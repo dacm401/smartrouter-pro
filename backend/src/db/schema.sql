@@ -1,0 +1,95 @@
+-- SmartRouter Pro v1.0 - Database Schema
+
+CREATE TABLE IF NOT EXISTS decision_logs (
+  id                VARCHAR(36) PRIMARY KEY,
+  user_id           VARCHAR(36) NOT NULL,
+  session_id        VARCHAR(36) NOT NULL,
+  query_preview     TEXT,
+  intent            VARCHAR(50),
+  complexity_score  SMALLINT,
+  input_token_count INTEGER,
+  has_code          BOOLEAN DEFAULT FALSE,
+  has_math          BOOLEAN DEFAULT FALSE,
+  router_version    VARCHAR(20),
+  fast_score        REAL,
+  slow_score        REAL,
+  confidence        REAL,
+  selected_model    VARCHAR(100),
+  selected_role     VARCHAR(10),
+  selection_reason  TEXT,
+  context_original_tokens   INTEGER,
+  context_compressed_tokens INTEGER,
+  compression_level VARCHAR(5),
+  compression_ratio REAL,
+  model_used        VARCHAR(100),
+  exec_input_tokens INTEGER,
+  exec_output_tokens INTEGER,
+  total_cost_usd    DECIMAL(10, 6),
+  latency_ms        INTEGER,
+  did_fallback      BOOLEAN DEFAULT FALSE,
+  fallback_reason   TEXT,
+  feedback_type     VARCHAR(50),
+  feedback_score    SMALLINT,
+  routing_correct   BOOLEAN,
+  cost_saved_vs_slow DECIMAL(10, 6),
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dl_user_time ON decision_logs(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_dl_intent ON decision_logs(user_id, intent);
+CREATE INDEX IF NOT EXISTS idx_dl_feedback ON decision_logs(user_id, feedback_score) WHERE feedback_score IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS behavioral_memories (
+  id                  VARCHAR(36) PRIMARY KEY,
+  user_id             VARCHAR(36) NOT NULL,
+  trigger_pattern     TEXT NOT NULL,
+  observation         TEXT NOT NULL,
+  learned_action      TEXT NOT NULL,
+  strength            REAL DEFAULT 0.5,
+  reinforcement_count INTEGER DEFAULT 1,
+  last_activated      TIMESTAMPTZ,
+  source_decision_ids TEXT[],
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bm_user ON behavioral_memories(user_id);
+
+CREATE TABLE IF NOT EXISTS identity_memories (
+  user_id              VARCHAR(36) PRIMARY KEY,
+  response_style       VARCHAR(20) DEFAULT 'balanced',
+  expertise_level      VARCHAR(20) DEFAULT 'intermediate',
+  domains              TEXT[] DEFAULT '{}',
+  quality_sensitivity  REAL DEFAULT 0.5,
+  cost_sensitivity     REAL DEFAULT 0.5,
+  preferred_fast_model VARCHAR(100),
+  preferred_slow_model VARCHAR(100),
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS growth_milestones (
+  id              VARCHAR(36) PRIMARY KEY,
+  user_id         VARCHAR(36) NOT NULL,
+  milestone_type  VARCHAR(50),
+  title           TEXT NOT NULL,
+  description     TEXT,
+  metric_value    REAL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gm_user ON growth_milestones(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id              VARCHAR(36) PRIMARY KEY,
+  user_id         VARCHAR(36) NOT NULL,
+  active_topic    TEXT,
+  total_requests  INTEGER DEFAULT 0,
+  fast_count      INTEGER DEFAULT 0,
+  slow_count      INTEGER DEFAULT 0,
+  fallback_count  INTEGER DEFAULT 0,
+  total_tokens    INTEGER DEFAULT 0,
+  total_cost      DECIMAL(10, 6) DEFAULT 0,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
