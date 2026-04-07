@@ -10,6 +10,7 @@ import { logDecision } from "../observatory/decision-logger.js";
 import { learnFromInteraction } from "../evolution/learning-engine.js";
 import { estimateCost } from "../models/token-counter.js";
 import { config } from "../config.js";
+import { TaskRepo } from "../db/repositories.js";
 import type { ChatMessage } from "../types/index.js";
 
 const chatRouter = new Hono();
@@ -48,6 +49,25 @@ chatRouter.post("/chat", async (c) => {
       routing.fallback_model = routing.selected_role === "fast" ? effectiveSlowModel : effectiveFastModel;
     }
 
+    // 创建任务记录（用 intent 作为 mode 推断：simple_qa/chat → direct，其他 → research）
+    const taskId = uuid();
+    const intentToMode: Record<string, string> = { simple_qa: "direct", chat: "direct", unknown: "direct" };
+    const mode = intentToMode[features.intent] || "research";
+    const complexityMap = ["low", "low", "medium", "high"];
+    const complexity = complexityMap[Math.min(Math.floor(features.complexity_score / 33), 3)];
+    const title = body.message.substring(0, 100);
+
+    TaskRepo.create({
+      id: taskId,
+      user_id: userId,
+      session_id: sessionId,
+      title,
+      mode,
+      complexity,
+      risk: "low",
+      goal: title,
+    }).catch((e) => console.error("Failed to create task:", e));
+
     const contextResult = await manageContext(
       { ...body, user_id: userId, session_id: sessionId },
       routing.selected_model
@@ -85,6 +105,8 @@ chatRouter.post("/chat", async (c) => {
 
     logDecision(decision).catch((e) => console.error("Failed to log decision:", e));
     learnFromInteraction(decision, body.message).catch((e) => console.error("Learning failed:", e));
+    // 更新任务执行统计
+    TaskRepo.updateExecution(taskId, modelResponse.input_tokens + modelResponse.output_tokens).catch((e) => console.error("Failed to update task:", e));
 
     const response: ChatResponse = {
       message: modelResponse.content,

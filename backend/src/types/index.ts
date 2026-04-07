@@ -182,3 +182,42 @@ export interface ModelPricing {
   input_per_1k: number;
   output_per_1k: number;
 }
+
+// ── Task entities ───────────────────────────────────────────────────────────
+
+export type TaskMode = "direct" | "research" | "execute";
+export type TaskStatus = "pending" | "running" | "waiting_subagent" | "completed" | "failed" | "blocked";
+export type ComplexityLevel = "low" | "medium" | "high";
+export type RiskLevel = "low" | "medium" | "high";
+
+export interface Task {
+  task_id: string;
+  user_id: string;
+  session_id: string;
+  title: string;
+  mode: TaskMode;
+  status: TaskStatus;
+  complexity: ComplexityLevel;
+  risk: RiskLevel;
+  goal: string | null;
+  budget_profile: Record<string, any>;
+  tokens_used: number;
+  tool_calls_used: number;
+  steps_used: number;
+  summary_ref: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface TaskListItem {
+  task_id: string;
+  title: string;
+  mode: TaskMode;
+  status: TaskStatus;
+  complexity: ComplexityLevel;
+  risk: RiskLevel;
+  updated_at: number;
+  session_id: string;
+}
+
+export interface TaskDetail extends Task {}

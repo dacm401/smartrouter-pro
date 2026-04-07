@@ -6,12 +6,12 @@ import { MemoryRepo } from "../db/repositories.js";
 import { countTokens } from "../models/token-counter.js";
 
 export async function analyzeAndRoute(request: ChatRequest): Promise<{ features: InputFeatures; routing: RoutingDecision }> {
-  const { message, history, user_id } = request;
+  const { message, history = [], user_id } = request;
 
   const intent = analyzeIntent(message);
   const tokenCount = countTokens(message);
   const contextTokens = history.reduce((sum, m) => sum + countTokens(m.content), 0);
-  const { score: complexityScore } = scoreComplexity(message, intent, history);
+  const { score: complexityScore } = scoreComplexity(message, intent, history ?? []);
 
   const features: InputFeatures = {
     raw_query: message, token_count: tokenCount, intent, complexity_score: complexityScore,

@@ -93,3 +93,26 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id              VARCHAR(36) PRIMARY KEY,
+  user_id         VARCHAR(36) NOT NULL,
+  session_id      VARCHAR(36) NOT NULL,
+  title           VARCHAR(255),
+  mode            VARCHAR(20) DEFAULT 'direct',
+  status          VARCHAR(20) DEFAULT 'completed',
+  complexity      VARCHAR(10) DEFAULT 'low',
+  risk            VARCHAR(10) DEFAULT 'low',
+  goal            TEXT,
+  budget_profile  JSONB DEFAULT '{}',
+  tokens_used     INTEGER DEFAULT 0,
+  tool_calls_used INTEGER DEFAULT 0,
+  steps_used      INTEGER DEFAULT 0,
+  summary_ref     VARCHAR(36),
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_user_session ON tasks(user_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(user_id, updated_at DESC);

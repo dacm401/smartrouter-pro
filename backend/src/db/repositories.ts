@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { query } from "./connection.js";
-import type { DecisionRecord, BehavioralMemory, IdentityMemory, GrowthProfile } from "../types/index.js";
+import type { DecisionRecord, BehavioralMemory, IdentityMemory, GrowthProfile, Task, TaskListItem } from "../types/index.js";
 import { GROWTH_LEVELS } from "../config.js";
 
 export const DecisionRepo = {
@@ -129,6 +129,79 @@ export const MemoryRepo = {
 
   async decayMemories(): Promise<void> {
     await query(`UPDATE behavioral_memories SET strength = strength * 0.98 WHERE last_activated < NOW() - INTERVAL '7 days'`);
+  },
+};
+
+export const TaskRepo = {
+  async list(userId: string, sessionId?: string): Promise<TaskListItem[]> {
+    let sql = `SELECT id as task_id, title, mode, status, complexity, risk, updated_at, session_id
+      FROM tasks WHERE user_id=$1`;
+    const params: any[] = [userId];
+    if (sessionId) {
+      sql += ` AND session_id=$2`;
+      params.push(sessionId);
+    }
+    sql += ` ORDER BY updated_at DESC LIMIT 100`;
+    const result = await query(sql, params);
+    return result.rows.map((r: any) => ({
+      task_id: r.task_id,
+      title: r.title || "",
+      mode: r.mode,
+      status: r.status,
+      complexity: r.complexity,
+      risk: r.risk,
+      updated_at: new Date(r.updated_at).getTime(),
+      session_id: r.session_id,
+    }));
+  },
+
+  async getById(taskId: string): Promise<Task | null> {
+    const result = await query(`SELECT * FROM tasks WHERE id=$1`, [taskId]);
+    if (result.rows.length === 0) return null;
+    const r: any = result.rows[0];
+    return {
+      task_id: r.id,
+      user_id: r.user_id,
+      session_id: r.session_id,
+      title: r.title || "",
+      mode: r.mode,
+      status: r.status,
+      complexity: r.complexity,
+      risk: r.risk,
+      goal: r.goal || null,
+      budget_profile: typeof r.budget_profile === "object" ? r.budget_profile : {},
+      tokens_used: r.tokens_used || 0,
+      tool_calls_used: r.tool_calls_used || 0,
+      steps_used: r.steps_used || 0,
+      summary_ref: r.summary_ref || null,
+      created_at: new Date(r.created_at).getTime(),
+      updated_at: new Date(r.updated_at).getTime(),
+    };
+  },
+
+  async create(data: {
+    id: string;
+    user_id: string;
+    session_id: string;
+    title: string;
+    mode: string;
+    complexity: string;
+    risk: string;
+    goal?: string;
+    tokens_used?: number;
+  }): Promise<void> {
+    await query(
+      `INSERT INTO tasks (id, user_id, session_id, title, mode, complexity, risk, goal, tokens_used, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed')`,
+      [data.id, data.user_id, data.session_id, data.title, data.mode, data.complexity, data.risk, data.goal || null, data.tokens_used || 0]
+    );
+  },
+
+  async updateExecution(taskId: string, tokensUsed: number): Promise<void> {
+    await query(
+      `UPDATE tasks SET tokens_used=$2, steps_used=steps_used+1, updated_at=NOW() WHERE id=$1`,
+      [taskId, tokensUsed]
+    );
   },
 };
 
