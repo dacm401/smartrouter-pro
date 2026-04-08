@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { calculateDashboard } from "../observatory/metrics-calculator.js";
+import { calculateDashboard } from "../logging/metrics-calculator.js";
 import { GrowthRepo } from "../db/repositories.js";
 
 const dashboardRouter = new Hono();

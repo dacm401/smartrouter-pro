@@ -6,8 +6,8 @@ import { manageContext } from "../context/context-manager.js";
 import { callModelFull } from "../models/model-gateway.js";
 import { callOpenAIWithOptions } from "../models/providers/openai.js";
 import { checkQuality } from "../router/quality-gate.js";
-import { logDecision } from "../observatory/decision-logger.js";
-import { learnFromInteraction } from "../evolution/learning-engine.js";
+import { logDecision } from "../logging/decision-logger.js";
+import { learnFromInteraction } from "../features/learning-engine.js";
 import { estimateCost } from "../models/token-counter.js";
 import { config } from "../config.js";
 import { TaskRepo } from "../db/repositories.js";
@@ -144,7 +144,7 @@ chatRouter.post("/chat", async (c) => {
 
 chatRouter.post("/feedback", async (c) => {
   const { decision_id, feedback_type } = await c.req.json();
-  const { recordFeedback } = await import("../evolution/feedback-collector.js");
+  const { recordFeedback } = await import("../features/feedback-collector.js");
   await recordFeedback(decision_id, feedback_type);
   return c.json({ success: true });
 });

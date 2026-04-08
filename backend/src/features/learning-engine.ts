@@ -1,6 +1,6 @@
 import type { DecisionRecord, FeedbackType } from "../types/index.js";
 import { recordFeedback, detectImplicitFeedback } from "./feedback-collector.js";
-import { analyzeAndLearn } from "./memory-store.js";
+import { analyzeAndLearn } from "../services/memory-store.js";
 import { checkAndRecordMilestones } from "./growth-tracker.js";
 import { MemoryRepo } from "../db/repositories.js";
 

@@ -8,11 +8,12 @@
 
 ### Services
 - `src/services/prompt-assembler.ts` — prompt assembly for direct/research modes
+- `src/services/memory-store.ts` — memory storage for future Memory v1
 - `src/context/context-manager.ts` — context compression and message assembly
 - `src/router/router.ts` — model routing and intent classification
 - `src/models/model-gateway.ts` — model call orchestration
-- `src/observatory/decision-logger.ts` — decision logging (known SQL bug)
-- `src/evolution/learning-engine.ts` — learning from interactions
+- `src/logging/decision-logger.ts` — decision logging (known SQL bug)
+- `src/features/learning-engine.ts` — learning from interactions (stub)
 
 ### Repositories / Data Access
 - `src/db/repositories.ts` — TaskRepo (create, getAll, getById, getSummary, getTraces, etc.)
