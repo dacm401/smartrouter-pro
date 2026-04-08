@@ -124,7 +124,12 @@ export class ExecutionLoop {
     let lastToolCallCount = 0;
     let consecutiveNoProgress = 0;
 
-    const plan: ExecutionPlan = { ...initialPlan, steps: [...initialPlan.steps] };
+    // Deep-copy the steps array so that step mutations (status, error) do not
+    // leak back into the caller's original plan object.
+    const plan: ExecutionPlan = {
+      ...initialPlan,
+      steps: initialPlan.steps.map((s) => ({ ...s })),
+    };
 
     await writeTrace({
       taskId,
@@ -168,6 +173,10 @@ export class ExecutionLoop {
             const newCalls = countToolCalls(messages) - lastToolCallCount;
             toolCallsExecuted += newCalls;
             lastToolCallCount = countToolCalls(messages);
+            // Emit of any tool call counts as meaningful progress — reset no-progress counter
+            if (newCalls > 0) {
+              consecutiveNoProgress = 0;
+            }
           } else if (step.type === "reasoning") {
             await this.#executeReasoningStep(
               step, messages, model, taskId, plan.steps, currentStepIndex
@@ -198,16 +207,21 @@ export class ExecutionLoop {
             detail: { error: stepError },
           });
 
-          // Hard abort on step failure (no retries in v1)
-          break;
+          // All step errors → re-throw so outer catch aborts the loop uniformly.
+          // GuardrailRejection (has isGuardrailRejection=true) is hard policy signal;
+          // other errors (DB failures, etc.) also cannot be safely continued.
+          throw err;
         }
+
+        // Advance to next step after successful completion
+        currentStepIndex++;
 
         await writeTrace({
           taskId,
           stepId: step.id,
           type: "step_complete",
           detail: {
-            step_index: currentStepIndex,
+            step_index: currentStepIndex - 1,
             step_type: step.type,
             tool_calls_this_step: step.type === "tool_call"
               ? countToolCalls(messages) - lastToolCallCount
@@ -225,8 +239,6 @@ export class ExecutionLoop {
           await writeTrace({ taskId, stepId: "loop", type: "loop_end", detail: { reason: "no_progress", consecutive_no_progress: consecutiveNoProgress } });
           return this.#buildResult(plan, messages, currentStepIndex, toolCallsExecuted, "no_progress");
         }
-
-        currentStepIndex++;
       }
 
       // ── Determine end reason ──────────────────────────────────────────────
@@ -260,7 +272,8 @@ export class ExecutionLoop {
         type: "loop_end",
         detail: { reason: "error", error: message },
       });
-      return this.#buildResult(plan, messages, currentStepIndex, toolCallsExecuted, "error");
+      // currentStepIndex points to the failed step; +1 because "completedSteps" = steps attempted
+      return this.#buildResult(plan, messages, currentStepIndex + 1, toolCallsExecuted, "error");
     }
   }
 
@@ -313,6 +326,7 @@ export class ExecutionLoop {
     // Execute any tool calls emitted by the model
     const toolCalls = (response as any).tool_calls ?? [];
     for (const tc of toolCalls) {
+      console.log("[EXEC-DEBUG] about to call toolExecutor.execute for", tc.function?.name);
       const toolCtx: ToolHandlerContext = { userId, sessionId, taskId };
       const result = await toolExecutor.execute(
         { id: tc.id ?? uuid(), tool_name: tc.function.name, arguments: JSON.parse(tc.function.arguments) },
