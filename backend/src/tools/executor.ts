@@ -6,11 +6,13 @@
  * - Dispatch to the appropriate handler (internal or external)
  * - Return ToolResult with timing and error info
  *
- * Security note: external tool calls (http_request, web_search) are routed
- * through ToolGuardrail before execution. The guardrail check is called by
- * the ExecutionLoop, not here — the executor trusts the loop's pre-check.
+ * External tools (http_request, web_search):
+ * - Guardrail check is performed HERE before execution (defence in depth)
+ * - If guardrail rejects: throws GuardrailRejection (caller catches and returns error result)
+ * - If guardrail allows: executes the actual HTTP call
  *
  * EL-001: Tool execution infrastructure.
+ * EL-004: Guardrail integration + real external tool execution.
  */
 
 import { v4 as uuid } from "uuid";
@@ -18,6 +20,16 @@ import type { ToolCall, ToolResult } from "../types/index.js";
 import { MemoryEntryRepo } from "../db/repositories.js";
 import { TaskRepo } from "../db/repositories.js";
 import { config } from "../config.js";
+import { toolGuardrail } from "../services/tool-guardrail.js";
+
+/** Thrown by a tool handler when a guardrail check rejects the call */
+export class GuardrailRejection extends Error {
+  readonly isGuardrailRejection = true as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "GuardrailRejection";
+  }
+}
 
 /** Context available to all tool handlers */
 export interface ToolHandlerContext {
@@ -46,10 +58,9 @@ export class ToolExecutor {
     this.register("task_read", this.handleTaskRead.bind(this));
     this.register("task_update", this.handleTaskUpdate.bind(this));
     this.register("task_create", this.handleTaskCreate.bind(this));
-    // External tools (http_request, web_search) are stubbed here;
-    // the actual HTTP call is delegated to ExecutionLoop after guardrail check.
-    this.register("http_request", this.handleExternalStub.bind(this, "http_request"));
-    this.register("web_search", this.handleExternalStub.bind(this, "web_search"));
+    // EL-004: external tools now have real implementations (after guardrail check)
+    this.register("http_request", this.handleHttpRequest.bind(this));
+    this.register("web_search", this.handleWebSearch.bind(this));
   }
 
   register(toolName: string, handler: ToolHandler): void {
@@ -86,6 +97,11 @@ export class ToolExecutor {
         latency_ms: Date.now() - start,
       };
     } catch (err: unknown) {
+      // GuardrailRejection → re-throw so the execution loop aborts (hard policy failure)
+      if ((err as any)?.isGuardrailRejection === true) {
+        throw err;
+      }
+      // Other errors → return failed ToolResult (loop continues or aborts based on its own logic)
       const message = err instanceof Error ? err.message : String(err);
       return {
         call_id: call.id,
@@ -215,18 +231,134 @@ export class ToolExecutor {
     return { task_id: id, title, mode, created: true };
   }
 
-  private async handleExternalStub(
-    toolName: string,
-    _args: Record<string, unknown>,
-    _ctx: ToolHandlerContext
+  // ── External tool handlers (EL-004) ─────────────────────────────────────────
+
+  private async handleHttpRequest(
+    args: Record<string, unknown>,
+    ctx: ToolHandlerContext
   ): Promise<unknown> {
-    // This is a stub. Actual HTTP execution is handled by ExecutionLoop
-    // after ToolGuardrail pre-check passes. Reaching this handler means
-    // the loop called the executor directly without going through guardrail.
-    throw new Error(
-      `${toolName} is an external tool and must be executed via the ExecutionLoop ` +
-        `after ToolGuardrail approval. Do not call this handler directly.`
-    );
+    // Guardrail pre-check — throws if rejected, causing step failure → loop abort
+    const guardResult = await toolGuardrail.validate({
+      toolName: "http_request",
+      args,
+      taskId: ctx.taskId ?? "unknown",
+      userId: ctx.userId,
+    });
+
+    if (!guardResult.allowed) {
+      throw new GuardrailRejection(guardResult.reason ?? "http_request rejected by guardrail");
+    }
+
+    const url = String(args.url ?? "");
+    const userHeaders = (args.headers as Record<string, string> | undefined) ?? {};
+
+    // Build fetch options with hard-coded safe defaults
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.guardrail.httpTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json, text/plain, */*",
+          "User-Agent": "SmartRouter-Pro/1.0",
+          ...userHeaders,
+        },
+        signal: controller.signal,
+        redirect: "follow",
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    // Enforce response size limit
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > config.guardrail.httpMaxResponseBytes) {
+      throw new Error(
+        `Response body too large (${contentLength} bytes). Max: ${config.guardrail.httpMaxResponseBytes} bytes.`
+      );
+    }
+
+    const text = await response.text();
+    const truncated = text.length > config.guardrail.httpMaxResponseBytes
+      ? text.slice(0, config.guardrail.httpMaxResponseBytes) + "\n[...truncated]"
+      : text;
+
+    return {
+      status: response.status,
+      status_text: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: truncated,
+      body_length: text.length,
+      url: response.url || url,
+    };
+  }
+
+  private async handleWebSearch(
+    args: Record<string, unknown>,
+    ctx: ToolHandlerContext
+  ): Promise<unknown> {
+    // Guardrail pre-check — throws if rejected, causing step failure → loop abort
+    const guardResult = await toolGuardrail.validate({
+      toolName: "web_search",
+      args,
+      taskId: ctx.taskId ?? "unknown",
+      userId: ctx.userId,
+    });
+
+    if (!guardResult.allowed) {
+      throw new GuardrailRejection(guardResult.reason ?? "web_search rejected by guardrail");
+    }
+
+    const query = String(args.query ?? "");
+    const maxResults = Math.min(Number(args.max_results ?? 5), 10);
+
+    // web_search is stubbed: calls a configured search API endpoint.
+    // If no search endpoint is configured, return a helpful stub response.
+    const searchEndpoint = process.env.WEB_SEARCH_ENDPOINT;
+    if (!searchEndpoint) {
+      return {
+        query,
+        results: [],
+        stub: true,
+        message: "web_search: No WEB_SEARCH_ENDPOINT configured. Set the environment variable to enable live search.",
+      };
+    }
+
+    // Build search URL (GET with query params)
+    const searchUrl = new URL(searchEndpoint);
+    searchUrl.searchParams.set("q", query);
+    searchUrl.searchParams.set("num", String(maxResults));
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), config.guardrail.httpTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(searchUrl.toString(), {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "SmartRouter-Pro/1.0",
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      throw new Error(`web_search: Search API returned ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      query,
+      results: Array.isArray(data.results) ? data.results.slice(0, maxResults) : [],
+      total: Array.isArray(data.results) ? data.results.length : 0,
+    };
   }
 }
 

@@ -41,6 +41,23 @@ export const config = {
       },
     },
   },
+
+  // EL-004: External tool guardrail
+  guardrail: {
+    // Hosts permitted for http_request tool. Empty = all hosts blocked (fail-safe).
+    httpAllowlist: (() => {
+      const env = process.env.HTTP_ALLOWLIST || "";
+      return env ? env.split(",").map((h) => h.trim().toLowerCase()) : [];
+    })(),
+    // Headers that must not be forwarded in http_request calls
+    blockedHeaders: ["authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token"],
+    // Whether external tool guardrail is enabled (kill switch)
+    enabled: process.env.GUARDRAIL_ENABLED !== "false",
+    // Timeout for http_request calls in ms
+    httpTimeoutMs: parseInt(process.env.HTTP_TIMEOUT_MS || "10000"),
+    // Max response size for http_request in bytes
+    httpMaxResponseBytes: parseInt(process.env.HTTP_MAX_RESPONSE_BYTES || "1048576"), // 1 MB
+  },
 };
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {

@@ -11,8 +11,8 @@
 |---|---|---|
 | EL-001 Tool Definition + Registry | ✅ Done | commit `8d1079d` |
 | EL-002 Task Planner | ✅ Done | commit `e491917` + `3894c3a` (pending push) |
-| EL-003 Execution Loop | ✅ Done | commit pending |
-| EL-004 Tool Guardrails + External API Safety | 🔴 Pending | Security layer |
+| EL-003 Execution Loop | ✅ Done | commit `086b937` (pending push) |
+| EL-004 Tool Guardrails + External API Safety | ✅ Done | commit pending |
 
 ---
 
