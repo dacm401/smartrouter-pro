@@ -15,7 +15,7 @@ import type { ChatMessage } from "../types/index.js";
 import { assemblePrompt } from "../services/prompt-assembler.js";
 import type { PromptMode } from "../services/prompt-assembler.js";
 import { MemoryEntryRepo } from "../db/repositories.js";
-import { runRetrievalPipeline } from "../services/memory-retrieval.js";
+import { runRetrievalPipeline, buildCategoryAwareMemoryText } from "../services/memory-retrieval.js";
 
 const chatRouter = new Hono();
 
@@ -110,12 +110,12 @@ chatRouter.post("/chat", async (c) => {
       }));
     }
 
+    // MR-002: category-aware memory text assembly
+    // Replaces flat "[category] content" list with grouped sections by category
     const taskSummary = retrievalResults.length > 0
       ? {
           goal: "User memories:",
-          summaryText: retrievalResults
-            .map((r) => `[${r.entry.category}] ${r.entry.content}`)
-            .join("\n"),
+          summaryText: buildCategoryAwareMemoryText(retrievalResults as any).combined,
           nextStep: null,
         }
       : undefined;

@@ -181,6 +181,86 @@ export function runRetrievalPipeline(
   return result;
 }
 
+// ── Category display labels ───────────────────────────────────────────────────
+
+/** Human-readable section labels for each memory category in the injected prompt. */
+const CATEGORY_LABELS: Record<string, string> = {
+  instruction: "Instructions & Goals",
+  preference: "Preferences",
+  fact: "Facts",
+  context: "Context",
+};
+
+/** Default label for unknown or unrecognised categories. */
+function getCategoryLabel(category: string): string {
+  return CATEGORY_LABELS[category] ?? category.charAt(0).toUpperCase() + category.slice(1);
+}
+
+// ── Category-aware memory text assembly ─────────────────────────────────────
+
+export interface CategoryAwareMemoryText {
+  /** Single combined text ready for prompt injection. */
+  combined: string;
+  /** Breakdown by category, for logging / debugging. */
+  breakdown: Record<string, string[]>;
+}
+
+/**
+ * Build a structured, category-grouped memory text for prompt injection.
+ *
+ * Output format:
+ * ```
+ * User memories:
+ *
+ * Instructions & Goals:
+ * - ...
+ * - ...
+ *
+ * Preferences:
+ * - ...
+ *
+ * Facts:
+ * - ...
+ * ```
+ *
+ * Only categories with at least one entry are included.
+ * MR-002: Replaces the flat "[category] content" assembly with a grouped format.
+ */
+export function buildCategoryAwareMemoryText(
+  results: MemoryRetrievalResult[]
+): CategoryAwareMemoryText {
+  // Group by category, preserving retrieval order within each group
+  const groups: Record<string, string[]> = {};
+  for (const r of results) {
+    const cat = r.entry.category;
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(r.entry.content);
+  }
+
+  // Build human-readable sections
+  const sections: string[] = [];
+  const breakdown: Record<string, string[]> = {};
+
+  // Enforce consistent category ordering: instruction > preference > fact > context > others
+  const categoryOrder = ["instruction", "preference", "fact", "context"];
+  const orderedCats = [
+    ...categoryOrder.filter((c) => groups[c]),
+    ...Object.keys(groups).filter((c) => !categoryOrder.includes(c)),
+  ];
+
+  for (const cat of orderedCats) {
+    const label = getCategoryLabel(cat);
+    const items = groups[cat];
+    breakdown[cat] = items;
+    sections.push(`${label}:\n${items.map((item) => `- ${item}`).join("\n")}`);
+  }
+
+  return {
+    combined: sections.join("\n\n"),
+    breakdown,
+  };
+}
+
 // ── Keyword extraction ───────────────────────────────────────────────────────
 
 /**
