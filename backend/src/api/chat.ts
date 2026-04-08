@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import type { ChatRequest, ChatResponse, DecisionRecord } from "../types/index.js";
 import { analyzeAndRoute } from "../router/router.js";
-import { manageContext } from "../context/context-manager.js";
+import { manageContext } from "../services/context-manager.js";
 import { callModelFull } from "../models/model-gateway.js";
 import { callOpenAIWithOptions } from "../models/providers/openai.js";
 import { checkQuality } from "../router/quality-gate.js";

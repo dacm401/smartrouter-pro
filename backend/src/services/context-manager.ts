@@ -1,6 +1,6 @@
 import type { ChatRequest, ChatMessage, ContextResult, CompressionLevel } from "../types/index.js";
-import { calculateBudget, needsCompression } from "./token-budget.js";
-import { compressHistory, autoSelectCompressionLevel } from "./compressor.js";
+import { calculateBudget, needsCompression } from "../context/token-budget.js";
+import { compressHistory, autoSelectCompressionLevel } from "../context/compressor.js";
 import { countTokens } from "../models/token-counter.js";
 
 /** Fallback system prompt used when no external prompt is provided. */

@@ -9,7 +9,7 @@
 ### Services
 - `src/services/prompt-assembler.ts` — prompt assembly for direct/research modes
 - `src/services/memory-store.ts` — memory storage for future Memory v1
-- `src/context/context-manager.ts` — context compression and message assembly
+- `src/services/context-manager.ts` — context compression and message assembly
 - `src/router/router.ts` — model routing and intent classification
 - `src/models/model-gateway.ts` — model call orchestration
 - `src/logging/decision-logger.ts` — decision logging (known SQL bug)
@@ -33,7 +33,7 @@ POST /api/chat
   → chat.ts: parse request, create task record
   → router.ts: classify intent + complexity, select model
   → prompt-assembler.ts: assemble system prompt by mode
-  → context-manager.ts: compress history, inject system prompt
+  → context-manager.ts (services/): compress history, inject system prompt
   → model-gateway.ts: call selected model
   → decision-logger.ts: write decision trace (known SQL bug — non-blocking)
   → chat.ts: write response trace, return { message, decision }
