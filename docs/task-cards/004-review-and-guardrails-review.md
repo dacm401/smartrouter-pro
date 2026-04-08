@@ -1,111 +1,122 @@
-# MC-004 Review: Review + Guardrails
+# MR-004 Review — Review + Guardrails
 
-## ✅ Acceptance Criteria Checklist
+## Card
+**MR-004: Review + Guardrails**
 
-| Criteria | Status |
+## Result
+Completed
+
+---
+
+## Goals
+Close out Sprint 04 with a full regression check, guardrail audit, documentation sync, and formal sprint archival.
+
+---
+
+## What Was Done
+
+### 1. Regression Review
+
+Checked the entire Memory v2 retrieval + injection path for regressions:
+
+| Scenario | Expected behaviour | Result |
+|---|---|---|
+| `strategy=v1` | Flat `importance DESC, updated_at DESC` ordering; `[category] content` flat format | ✅ Preserved — v1 path returns raw `getTopForUser()` results |
+| `strategy=v2` | Retrieval pipeline active; category-grouped output | ✅ Preserved — `runRetrievalPipeline()` called when `strategy === "v2"` |
+| `memory.enabled=false` | No DB reads, no memory in prompt | ✅ Preserved — `config.memory.enabled` gate exists |
+| v2 returns empty | Falls back to v1 results | ✅ Preserved — explicit fallback in chat.ts |
+| Empty user message | Keyword score = 0; importance + recency only | ✅ Preserved — `extractTokens([])` returns `[]` → Jaccard = 0 |
+| Long memory content | Jaccard normalisation prevents inflation | ✅ Preserved — `computeKeywordRelevance()` uses `|intersection| / |union|` |
+| TypeScript build | Zero errors | ✅ |
+
+### 2. Guardrail Audit
+
+| Guard | Mechanism | Status |
+|---|---|---|
+| `content` length | API layer in `memory.ts` | ✅ Enforced: 2000 char max |
+| `importance` range | API layer validation | ✅ Enforced: coerced to 1–5 |
+| `tags` count | API layer | ✅ Enforced: max 10 per entry |
+| `tags` length | API layer | ✅ Enforced: max 50 chars per tag |
+| List `limit` | API layer | ✅ Enforced: max 100 per request |
+| Injection entries | `config.memory.maxEntriesToInject` | ✅ Enforced: 5 entries max |
+| Injection tokens | `prompt-assembler.ts` `maxTaskSummaryTokens` | ✅ Enforced: 750 tokens max |
+| Relevance score inflation | `computeKeywordRelevance()` Jaccard normalisation | ✅ Enforced: score bounded by formula |
+| Strategy enum | `config.memory.retrieval.strategy: "v1" \| "v2"` | ✅ Enforced: TypeScript enum |
+| Category policy | `config.memory.retrieval.categoryPolicy` | ✅ Config-driven, not hard-coded |
+
+### 3. Documentation Sync
+
+**`docs/runtime-flow.md`:**
+- Updated `Last verified` to Sprint 04 MR-004
+- Step 4 expanded with full Memory v2 retrieval pipeline (MR-001/002/003)
+- Data Touchpoints → Memory v2 section updated with v1/v2 injection paths
+- Memory API Guardrails table expanded with v2 scoring limits
+- File/Module Map → `memory-retrieval.ts` added to services
+- Known Quirks Q4 updated to reflect v2 retrieval cost
+- Suggested Future Cleanup updated: P2 v2 upgrade item added, P3 semantic retrieval noted for v3
+- Footer updated
+
+**`docs/repo-map.md`:**
+- `memory-retrieval.ts` added to Services section
+- Runtime Flow Overview updated with v2 retrieval pipeline steps
+- `MemoryEntryRepo` notes expanded to mention the v2 retrieval layer
+
+---
+
+## Scope Boundary
+
+- **No new features introduced** — MR-004 is purely a review and documentation card
+- **No schema changes** — `memory_entries` table unchanged
+- **No new API endpoints** — all existing endpoints unchanged
+- **No embedding / semantic search** — deferred to Memory v3
+
+---
+
+## Memory v2 Capability Summary (Sprint 04 Final State)
+
+| Layer | v1 (Sprint 03) | v2 (Sprint 04) |
+|---|---|---|
+| Retrieval | `importance DESC, updated_at DESC` | `runRetrievalPipeline()` with category policy |
+| Scoring | None | Importance (30) + Recency (20) + Keyword relevance (15) = max 65 |
+| Keyword matching | Raw token overlap | Stopword-filtered + stemming + Jaccard normalised |
+| Prompt format | Flat `[category] content` | Category-grouped sections with human-readable labels |
+| Strategy toggle | None | `memory.retrieval.strategy: v1 \| v2` |
+| Fallback | N/A | v2 empty → falls back to v1 results |
+| Explainability | Minimal | `reason` string on every scored result |
+
+---
+
+## Memory v2 Known Limitations
+
+- **Lexical relevance only** — no embeddings, vectors, or semantic similarity
+- **No auto-extraction** — memories must be manually created via API
+- **Category schema fixed** — `instruction`/`preference`/`fact`/`context` (no `goal`/`constraint`)
+- **No conflict resolution** — multiple memories on same topic not deduplicated
+- **No TTL / expiration** — memories persist indefinitely
+- **No evidence attribution** — injected memories are treated as facts
+- **v2 scoring is heuristic** — not learned or tuned on feedback data
+
+---
+
+## Deferred to Future Sprints
+
+| Item | Direction |
 |---|---|
-| All guardrails enforced in API layer and assembler | ✅ |
-| `docs/runtime-flow.md` reflects Memory v1 injection path | ✅ |
-| `docs/repo-map.md` includes memory API routes | ✅ |
-| 3 review docs exist for MC-001/002/003 | ✅ |
-| This review doc (MC-004) exists | ✅ |
-| TypeScript build passes | ✅ |
+| Semantic relevance scoring | Memory v3: embedding-based retrieval |
+| Memory auto-extraction | From conversation history or feedback signals |
+| Category schema expansion | `goal`/`constraint` differentiation |
+| Memory conflict resolution | Deduplication / merge policy |
+| Retrieval quality feedback loop | Tune weights from decision outcomes |
+| TTL / memory expiration | Time-based memory retirement |
+| Batch caching for `getTopForUser()` | Request-level cache to reduce DB reads |
 
 ---
 
-## 📦 Guardrails Summary
+## MR-004 Assessment
 
-### API-layer guardrails (MC-004, added to `backend/src/api/memory.ts`)
+This was the correct final card for Sprint 04. The core functionality was delivered in MR-001/002/003. MR-004's value was in:
+1. Making the regression surface explicit and verified
+2. Consolidating all Memory v2 changes into the main documentation
+3. Creating a clear record of what v2 is, what it is not, and where it goes next
 
-| Guard | Rule | POST | PUT |
-|---|---|---|---|
-| `content` max length | 2000 characters | ✅ | ✅ |
-| `importance` range | 1–5, coerced to nearest boundary | ✅ | ✅ |
-| `tags` count | max 10 per entry | ✅ | ✅ |
-| `tags` per-item length | max 50 characters per tag | ✅ | ✅ |
-| List `limit` | max 100 per request | ✅ | — |
-
-### Assembler-layer guardrails (MC-003, `backend/src/services/prompt-assembler.ts`)
-
-| Guard | Rule |
-|---|---|
-| Injection entries | max `config.memory.maxEntriesToInject` (default 5) |
-| Injection tokens | hard cap `maxEntriesToInject × maxTokensPerEntry` = 750 tokens |
-| Kill switch | `MEMORY_INJECTION_ENABLED=false` env var |
-
----
-
-## 📄 Documentation Updates
-
-### `docs/runtime-flow.md` (updated in MC-004)
-
-Changes made:
-- Header updated: "Last verified: Sprint 03 MC-004"
-- High-level flow diagram: added Step 4b (memory injection) + `/v1/memory` routes block
-- Step 4 (Prompt Assembly): documented memory injection path, kill switch, token budget
-- Section 6 — Memory API Routes: all 5 endpoints with request/response shapes and guardrail table
-- File/module map: added `memory.ts`
-- Data touchpoints: added Memory v1 section with CRUD paths + injection path
-- Future Cleanup Notes: P1 `taskSummary` item marked ✅ Done
-- Bottom timestamp updated
-
-### `docs/repo-map.md` (updated in MC-004)
-
-Changes made:
-- API Routes: added `src/api/memory.ts`
-- Repositories: added `MemoryEntryRepo` with method list and `memory_entries` table description
-- Runtime Flow Summary: added `MemoryEntryRepo.getTopForUser()` + `prompt-assembler.ts` taskSummary injection step
-
----
-
-## 📋 All 4 MC Review Docs
-
-| Card | Review Doc |
-|---|---|
-| MC-001 | `001-memory-data-model-and-repository-review.md` ✅ |
-| MC-002 | `002-memory-crud-apis-review.md` ✅ |
-| MC-003 | `003-memory-prompt-injection-review.md` ✅ |
-| MC-004 | `004-review-and-guardrails-review.md` ✅ (this file) |
-
----
-
-## 🧭 Guardrails Design Decisions
-
-### Why enforce at API layer, not repo layer
-- `content` length and `tags` constraints are request-level validity concerns, not data integrity concerns
-- Repo layer is responsible for data access and persistence; input validation belongs at the API boundary
-- Keeping validation at API layer keeps the repo portable
-
-### Why not add injection-level relevance filtering
-- Current selection is by `importance DESC, updated_at DESC` — simple and predictable
-- Semantic/relevance filtering would require embedding models or external retrieval service
-- That's future work (post-Memory-v1)
-
-### Why `memory_entries` over `memory_tags` for v1
-- TEXT[] is native PostgreSQL; no join overhead for v1 scale
-- Can be extracted into a separate table later when tag-specific queries become necessary
-- Premature optimization avoided
-
----
-
-## 🚫 Non-Goals (Not Done)
-
-- Load testing
-- Multi-user isolation beyond `user_id`
-- Performance optimization of memory reads
-- Semantic/relevance filtering for injection
-- Auto-extraction from chat history
-- Memory conflict resolution
-
----
-
-## 🔗 Sprint 03 Completion Summary
-
-| Card | Description | Commit | Status |
-|---|---|---|---|
-| MC-001 | `memory_entries` schema + `MemoryEntryRepo` | `483a36b` | ✅ |
-| MC-002 | 5 CRUD endpoints + mount `/v1/memory` | `50a0cf4` | ✅ |
-| MC-003 | Memory prompt injection + token budget | `ac44427` | ✅ |
-| MC-004 | Guardrails + documentation + review docs | (this card) | ✅ |
-
-Sprint 03 is complete.
+The sprint closed with a well-documented, tested, and bounded Memory v2 capability.

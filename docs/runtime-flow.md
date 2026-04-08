@@ -1,7 +1,7 @@
 # Runtime Flow
 
 > **Scope:** Backend only. Documents the actual runtime path of a request through the system.
-> **Last verified:** Sprint 03 MC-004
+> **Last verified:** Sprint 04 MR-004
 > **Principal entrypoint:** `POST /api/chat`
 
 ---
@@ -17,7 +17,7 @@ HTTP POST /api/chat
   │     ├── ② create task record  (fire-and-forget, non-blocking)
   │     ├── ③ intent + complexity analysis
   │     ├── ④ model routing  → { features, routing }
-  │     ├── ④b memory injection  (MemoryEntryRepo → taskSummary)  ← Memory v1
+  │     ├── ④b memory injection  (MemoryEntryRepo → retrieval pipeline → taskSummary)  ← Memory v2 (Sprint 04 MR-001~003)
   │     ├── ⑤ prompt assembly  (PromptAssembler, receives taskSummary)
   │     ├── ⑥ context management  (ContextManager)
   │     ├── ⑦ model call  (model-gateway)
@@ -147,35 +147,70 @@ Request-level override: if `body.fast_model` or `body.slow_model` is set, those 
 
 ---
 
-### Step 4 — Prompt Assembly
+### Step 4 — Memory Retrieval + Prompt Assembly
+
+**Memory injection flow (Memory v2 — Sprint 04 MR-001/002/003):**
+
+```
+MemoryEntryRepo.getTopForUser(userId, N)        ← candidate pool
+        ↓
+runRetrievalPipeline()  (memory-retrieval.ts)  ← MR-001 scoring + filtering
+        ↓
+buildCategoryAwareMemoryText()                 ← MR-002 category formatting
+        ↓
+taskSummary → assemblePrompt()                  ← injected into system prompt
+```
+
+**v1 / v2 strategy toggle:**
+
+| Config key | Values | Behaviour |
+|---|---|---|
+| `memory.retrieval.strategy` | `"v1"` (default) | Flat `importance DESC, updated_at DESC` ordering |
+| `"v2"` | Category-aware retrieval pipeline | |
+
+Set via `MEMORY_RETRIEVAL_STRATEGY` env var. Default: `"v1"` (safe, no behaviour change).
+
+**v2 scoring model (fixed weights, explainable):**
+
+| Component | Max pts | Description |
+|---|---|---|
+| Importance | 30 | `importance × 6` |
+| Recency | 20 | Exponential decay, half-life ~10 days |
+| Keyword relevance | 15 | Jaccard-normalised token overlap (MR-003) |
+| **Total max** | **65** | |
+
+**Category-aware formatting (MR-002):**
+
+Entries are grouped into labelled sections, one per category:
+
+```
+User memories:
+
+Instructions & Goals:
+- {entry.content}
+
+Preferences:
+- {entry.content}
+
+Facts:
+- {entry.content}
+```
+
+Only categories with at least one entry are included. Section order: instruction → preference → fact → context → others.
+
+**Prompt assembly:**
 
 **File:** `backend/src/services/prompt-assembler.ts` → `assemblePrompt()`
-**Inputs:** `mode` (`"direct" | "research"`), `userMessage`, `taskSummary?`, `maxTaskSummaryTokens?`
-**Output:** `PromptAssemblyOutput`
-
-Sections assembled in order:
 
 ```
 [1] core_rules
-    "You are SmartRouter Pro, an intelligent AI assistant.
-     Respond accurately and helpfully. Do not fabricate information.
-     Format responses clearly. ..."
-
 [2] mode_policy
-    direct:  "Mode: direct — Answer directly and concisely..."
-    research: "Mode: research — Prioritize structured analysis..."
-
-[3] task_summary  ← injected by Memory v1 (Sprint 03 MC-003)
-    "Task context:\n- Goal: User memories:\n- Summary: [preference] ...\n[fact] ..."
-
+[3] task_summary  ← Memory v2 (category-grouped)
 systemPrompt = [1] + "\n\n" + [2] (+ "\n\n" + [3] if present)
 userPrompt = userMessage
 ```
 
-**Memory injection (MC-003):**
-Before `assemblePrompt()`, `chat.ts` fetches memories via `MemoryEntryRepo.getTopForUser(userId, 5)` (conditional on `config.memory.enabled`). A `taskSummary` object is built and passed in. If `taskSummary` section exceeds `maxTaskSummaryTokens` (default 750 = 5 × 150), it is truncated with a `[...truncated]` marker.
-
-Kill switch: `MEMORY_INJECTION_ENABLED=false` env var disables all memory reads.
+Kill switch: `MEMORY_INJECTION_ENABLED=false` disables all memory reads. Token budget guard (`maxTaskSummaryTokens`) remains active in `prompt-assembler.ts`.
 
 ---
 
@@ -350,7 +385,8 @@ backend/src/
 │
 ├── services/
 │   ├── prompt-assembler.ts   ← system prompt assembly (direct / research)
-│   └── context-manager.ts    ← history compression + message assembly
+│   ├── context-manager.ts    ← history compression + message assembly
+│   └── memory-retrieval.ts   ← Memory v2: retrieval pipeline + scoring + category formatting
 │
 ├── context/              ← pure utilities (imported by context-manager)
 │   ├── token-budget.ts   ← budget calculation per model
@@ -394,7 +430,7 @@ TaskRepo.create()       ← new task record, mode=direct|research
   → TaskRepo.createTrace() × 3    ← classification / routing / response
 ```
 
-### Memory v1 — User Editable Memory
+### Memory v2 — Retrieval and Relevance (Sprint 04)
 
 ```
 POST   /v1/memory                  ← MemoryEntryRepo.create()
@@ -403,10 +439,21 @@ GET    /v1/memory/:id              ← MemoryEntryRepo.getById()
 PUT    /v1/memory/:id              ← MemoryEntryRepo.update()
 DELETE /v1/memory/:id              ← MemoryEntryRepo.delete()
 
-chat.ts Step 4b                    ← MemoryEntryRepo.getTopForUser() — on every chat
+chat.ts Step 4b                    ← MemoryEntryRepo.getTopForUser() → runRetrievalPipeline() → buildCategoryAwareMemoryText() — on every chat
 ```
 
-Injection path: `getTopForUser()` → `taskSummary` → `assemblePrompt()` → `manageContext()` → model.
+**Injection path (v1, legacy):**
+`getTopForUser()` → `taskSummary` → `assemblePrompt()` → `manageContext()` → model.
+
+**Injection path (v2, active when `memory.retrieval.strategy === "v2"`):**
+`getTopForUser()` → `runRetrievalPipeline()` → `buildCategoryAwareMemoryText()` → `taskSummary` → `assemblePrompt()` → `manageContext()` → model.
+
+**Retrieval pipeline stages (MR-001/003):**
+1. Score each candidate: importance (30) + recency (20) + keyword relevance (15)
+2. Check category eligibility via `config.memory.retrieval.categoryPolicy`
+3. Always-inject categories fill first (up to per-category maxCount)
+4. Remaining slots filled by highest-scoring relevance-gated entries
+5. Final output sorted by score descending
 
 ### Decision Log
 
@@ -495,6 +542,8 @@ DELETE /v1/memory/:id
 | List `limit` | max 100 per request |
 | Injection entries | max 5 (`config.memory.maxEntriesToInject`) |
 | Injection tokens | max 750 (`5 × 150`, enforced in `prompt-assembler.ts`) |
+| v2 relevance score | no cap (components individually bounded; max theoretical total: 65) |
+| `memory.retrieval.strategy` | enum: `"v1"` or `"v2"` |
 
 ---
 
@@ -505,7 +554,7 @@ DELETE /v1/memory/:id
 | Q1 | `decision-logger.ts` SQL has `$1`–`$27` placeholders but only 26 values passed; `fallback_reason` written in a separate UPDATE | Non-blocking: decision still saved, fallback_reason column may be NULL | Graceful degradation |
 | Q2 | `GET /v1/tasks/:id/summary` returns 404 for new tasks without summary | Correct behavior — not a regression | Distinguish "Task not found" vs "Summary not found" by error message |
 | Q3 | Task creation + all trace writes are fire-and-forget | Request response not affected | Monitor via task APIs if needed |
-| Q4 | `MemoryRepo.getIdentity()` and `getBehavioralMemories()` run on every chat request | Potential latency if DB grows | Future: cache identity, batch behavioral reads |
+| Q4 | `MemoryEntryRepo.getTopForUser()` runs on every chat request | Potential latency if `memory_entries` table grows large | v2 retrieval adds scoring overhead; candidate pool capped at 1.5× injection limit |
 | Q5 | `Complexity-scorer` intent base scores are hardcoded and language-agnostic | May not reflect actual complexity for non-chat/simple_qa intents | Rule-based router is intentionally simple; extend when data is available |
 | Q6 | `POST /api/chat` endpoint, NOT `/v1/chat` | Existing API convention | Keep as-is |
 | Q7 | `identity_memories.updated_at` stored as `number` (Unix ms), not ISO string | Internal inconsistency with task API format | Non-blocking (internal table) |
@@ -518,9 +567,11 @@ DELETE /v1/memory/:id
 |---|---|---|
 | P1 | Fix SQL placeholder count in `DecisionRepo.save()` | Correctness issue, non-blocking but bad for debugging |
 | ~~P1~~ | ~~Implement `taskSummary` injection in `assemblePrompt()`~~ | ✅ Done in Sprint 03 MC-003 |
-| P2 | Add request-level caching for `MemoryRepo.getIdentity()` | Every chat request does a DB round-trip for identity |
+| ~~P2~~ | ~~Add `memory_items_retrieved` to `ContextResult`~~ | ✅ Done in Sprint 04 (v2 pipeline adds scoring detail to memory injection path) |
+| P2 | Add request-level caching for `MemoryEntryRepo.getTopForUser()` | Every chat does a DB read when memory enabled |
 | P2 | Standardize internal time fields (`identity_memories.updated_at`, etc.) | TC-007 only covered outward task APIs |
-| P2 | Add `memory_items_retrieved` to `ContextResult` (currently always 0) | Makes memory injection observable in decision logs |
+| P2 | Consider `memory_retrieval_strategy=v2` as default once stable | v1 is the safe fallback; v2 adds value once confidence builds |
+| P3 | Semantic/embedding-based relevance scoring | Save for Memory v3 |
 | P3 | Behavioral memory batch reads with TTL cache | 50-row scan every chat request won't scale |
 | P3 | Consider moving `quality-gate.ts` into `services/` | It contains business logic, not pure routing |
 | P3 | Document `compressor.ts` compression algorithms | Compression behavior is opaque without reading the code |
@@ -534,4 +585,4 @@ Internal DB storage format remains **Unix milliseconds number** (for now).
 
 ---
 
-_Revised after Sprint 03 MC-004. Supersedes prior informal flow descriptions._
+_Revised after Sprint 04 MR-004. Supersedes prior informal flow descriptions._

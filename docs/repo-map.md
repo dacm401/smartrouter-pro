@@ -11,6 +11,7 @@
 - `src/services/prompt-assembler.ts` — prompt assembly for direct/research modes
 - `src/services/memory-store.ts` — memory storage for future Memory v1
 - `src/services/context-manager.ts` — context compression and message assembly
+- `src/services/memory-retrieval.ts` — Memory v2: retrieval pipeline, scoring, category-aware formatting
 - `src/router/router.ts` — model routing and intent classification
 - `src/models/model-gateway.ts` — model call orchestration
 - `src/logging/decision-logger.ts` — decision logging (known SQL bug)
@@ -20,6 +21,7 @@
 - `src/db/repositories.ts` — TaskRepo, DecisionRepo, MemoryRepo, GrowthRepo, MemoryEntryRepo
   - `MemoryEntryRepo`: create, getById, list, update, delete, getTopForUser
   - `memory_entries` table: user-scoped, supports preference/fact/context/instruction categories
+  - Retrieval layer (Sprint 04 MR-001/002/003): `src/services/memory-retrieval.ts` wraps `getTopForUser()` with scoring + formatting
 
 ### Docs
 - `docs/current-sprint.md` — active sprint
@@ -39,9 +41,11 @@ Brief summary:
 POST /api/chat
   → chat.ts: parse request, create task record
   → router.ts: classify intent + complexity, select model
-  → MemoryEntryRepo.getTopForUser() — Sprint 03 MC-003: fetch top memories (config-gated)
+  → MemoryEntryRepo.getTopForUser() — fetch candidate pool (config-gated)
+  → runRetrievalPipeline() — Sprint 04 MR-001/003: score + filter (v2 only)
+  → buildCategoryAwareMemoryText() — Sprint 04 MR-002: category-grouped formatting
   → prompt-assembler.ts: assemble system prompt by mode + taskSummary injection
-  → context-manager.ts (services/): compress history, inject system prompt
+  → context-manager.ts: compress history, inject system prompt
   → model-gateway.ts: call selected model
   → quality-gate.ts: fast-path quality check + fallback if needed
   → decision-logger.ts: write decision trace (known SQL bug — non-blocking)
