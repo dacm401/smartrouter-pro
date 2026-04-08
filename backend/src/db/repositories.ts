@@ -222,11 +222,21 @@ export const TaskRepo = {
     };
   },
 
-  async getTraces(taskId: string): Promise<TaskTrace[]> {
-    const result = await query(
-      `SELECT * FROM task_traces WHERE task_id=$1 ORDER BY created_at ASC`,
-      [taskId]
-    );
+  async getTraces(taskId: string, options?: { type?: string; limit?: number }): Promise<TaskTrace[]> {
+    const typeFilter = options?.type;
+    const limit = options?.limit ?? 100;
+
+    let sql = `SELECT * FROM task_traces WHERE task_id=$1`;
+    const params: any[] = [taskId];
+
+    if (typeFilter) {
+      sql += ` AND type=$2`;
+      params.push(typeFilter);
+    }
+    sql += ` ORDER BY created_at ASC LIMIT $${params.length + 1}`;
+    params.push(limit);
+
+    const result = await query(sql, params);
     return result.rows.map((r: any) => {
       let detail: Record<string, any> | null = null;
       if (r.detail) {
@@ -239,7 +249,7 @@ export const TaskRepo = {
       return {
         trace_id: r.id,
         task_id: r.task_id,
-        type: r.type,
+        type: r.type as import("../types/index.js").TraceType,
         detail,
         created_at: new Date(r.created_at).toISOString(),
       };

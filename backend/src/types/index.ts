@@ -241,13 +241,39 @@ export interface TaskSummary {
   updated_at: string;
 }
 
-export type TraceType = "classification" | "routing" | "response" | "tool_call" | "error";
+export type TraceType =
+  | "classification"
+  | "routing"
+  | "response"
+  | "planning"
+  | "guardrail"
+  | "step_start"
+  | "step_complete"
+  | "step_failed"
+  | "loop_start"
+  | "loop_end"
+  | "error";
 
 export interface TaskTrace {
   trace_id: string;
   task_id: string;
   type: TraceType;
   detail: Record<string, any> | null;
+  created_at: string;
+}
+
+export interface GetTracesOptions {
+  /** Filter by trace type */
+  type?: TraceType;
+  /** Maximum number of traces to return (default: 100) */
+  limit?: number;
+}
+
+/** Human-readable summary of a trace */
+export interface TraceSummary {
+  trace_id: string;
+  type: TraceType;
+  summary: string;
   created_at: string;
 }
 

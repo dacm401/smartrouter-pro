@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { TaskRepo } from "../db/repositories.js";
+import { formatTraceSummaries } from "../services/trace-formatter.js";
 
 // Mounted at /v1/tasks via index.ts
 export const taskRouter = new Hono();
@@ -37,12 +38,23 @@ taskRouter.get("/:task_id/summary", async (c) => {
 // GET /v1/tasks/:task_id/traces — must be registered before /:task_id
 taskRouter.get("/:task_id/traces", async (c) => {
   const taskId = c.req.param("task_id");
+  const type = c.req.query("type") || undefined;
+  const limitParam = c.req.query("limit");
+  const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 100, 500) : 100;
+
   try {
     const task = await TaskRepo.getById(taskId);
     if (!task) return c.json({ error: `Task not found: ${taskId}` }, 404);
 
-    const traces = await TaskRepo.getTraces(taskId);
-    return c.json({ task_id: taskId, traces });
+    const traces = await TaskRepo.getTraces(taskId, { type, limit });
+    const summaries = formatTraceSummaries(traces);
+
+    return c.json({
+      task_id: taskId,
+      count: traces.length,
+      traces,
+      summaries,
+    });
   } catch (error: any) {
     console.error("Task traces error:", error);
     return c.json({ error: error.message }, 500);
