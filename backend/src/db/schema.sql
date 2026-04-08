@@ -39,6 +39,24 @@ CREATE INDEX IF NOT EXISTS idx_dl_user_time ON decision_logs(user_id, created_at
 CREATE INDEX IF NOT EXISTS idx_dl_intent ON decision_logs(user_id, intent);
 CREATE INDEX IF NOT EXISTS idx_dl_feedback ON decision_logs(user_id, feedback_score) WHERE feedback_score IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS execution_results (
+  id                  VARCHAR(36) PRIMARY KEY,
+  task_id             VARCHAR(36),
+  user_id             VARCHAR(36) NOT NULL,
+  session_id          VARCHAR(36) NOT NULL,
+  final_content       TEXT,
+  steps_summary       JSONB,
+  memory_entries_used TEXT[]     DEFAULT '{}',
+  model_used          VARCHAR(100),
+  tool_count          INTEGER    DEFAULT 0,
+  duration_ms         INTEGER,
+  reason              VARCHAR(50),
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_er_user_time  ON execution_results(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_er_task       ON execution_results(task_id);
+
 CREATE TABLE IF NOT EXISTS behavioral_memories (
   id                  VARCHAR(36) PRIMARY KEY,
   user_id             VARCHAR(36) NOT NULL,

@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 import { query } from "./connection.js";
-import type { DecisionRecord, BehavioralMemory, IdentityMemory, GrowthProfile, Task, TaskListItem, TaskSummary, TaskTrace, MemoryEntry, MemoryEntryInput, MemoryEntryUpdate } from "../types/index.js";
+import type { DecisionRecord, BehavioralMemory, IdentityMemory, GrowthProfile, Task, TaskListItem, TaskSummary, TaskTrace, MemoryEntry, MemoryEntryInput, MemoryEntryUpdate, ExecutionResultRecord, ExecutionResultInput } from "../types/index.js";
 import { GROWTH_LEVELS } from "../config.js";
 
 export const DecisionRepo = {
@@ -405,6 +405,74 @@ export const MemoryEntryRepo = {
     return result.rows.map(mapMemoryRow);
   },
 };
+
+export const ExecutionResultRepo = {
+  async save(r: ExecutionResultInput): Promise<ExecutionResultRecord> {
+    const id = uuid();
+    const result = await query(
+      `INSERT INTO execution_results (
+        id, task_id, user_id, session_id,
+        final_content, steps_summary, memory_entries_used,
+        model_used, tool_count, duration_ms, reason
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING *`,
+      [
+        id,
+        r.task_id,
+        r.user_id,
+        r.session_id,
+        r.final_content,
+        JSON.stringify(r.steps_summary),
+        r.memory_entries_used ?? [],
+        r.model_used ?? null,
+        r.tool_count,
+        r.duration_ms ?? null,
+        r.reason,
+      ]
+    );
+    return mapExecutionResultRow(result.rows[0]);
+  },
+
+  async getByTaskId(taskId: string): Promise<ExecutionResultRecord | null> {
+    const result = await query(
+      `SELECT * FROM execution_results WHERE task_id=$1 LIMIT 1`,
+      [taskId]
+    );
+    if (result.rows.length === 0) return null;
+    return mapExecutionResultRow(result.rows[0]);
+  },
+
+  async listByUser(
+    userId: string,
+    limit = 20
+  ): Promise<ExecutionResultRecord[]> {
+    const result = await query(
+      `SELECT * FROM execution_results
+       WHERE user_id=$1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows.map(mapExecutionResultRow);
+  },
+};
+
+function mapExecutionResultRow(r: any): ExecutionResultRecord {
+  return {
+    id: r.id,
+    task_id: r.task_id,
+    user_id: r.user_id,
+    session_id: r.session_id,
+    final_content: r.final_content,
+    steps_summary: r.steps_summary ?? null,
+    memory_entries_used: r.memory_entries_used ?? [],
+    model_used: r.model_used,
+    tool_count: r.tool_count ?? 0,
+    duration_ms: r.duration_ms ?? null,
+    reason: r.reason,
+    created_at: new Date(r.created_at).toISOString(),
+  };
+}
 
 function mapMemoryRow(r: any): MemoryEntry {
   return {

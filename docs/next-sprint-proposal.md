@@ -1,10 +1,14 @@
 # Next Sprint Proposal
 
+> **Status:** Sprint 07 proposal below. Sprint 06 (Testing and Observability) completed 2026-04-08. Full suite: 84 tests.
+
+---
+
 ## Recommended Sprint Name
-**Testing and Observability for Execution**
+**Execution Result Memory Persistence**
 
 ## Recommended Goal
-Establish the minimum viable test suite and observability layer for the Execution Loop system delivered in Sprint 05, before expanding functionality further.
+Close the loop between execution output and memory: execution results are stored as persistent records and available to future planning calls. Fix the decision-logger SQL placeholder bug in the same sprint.
 
 ---
 

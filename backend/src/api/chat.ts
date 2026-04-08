@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
-import type { ChatRequest, ChatResponse, DecisionRecord } from "../types/index.js";
+import type { ChatRequest, ChatResponse, DecisionRecord, ExecutionStepsSummary } from "../types/index.js";
 import { analyzeAndRoute } from "../router/router.js";
 import { manageContext } from "../services/context-manager.js";
 import { callModelFull } from "../models/model-gateway.js";
@@ -14,7 +14,7 @@ import { TaskRepo } from "../db/repositories.js";
 import type { ChatMessage } from "../types/index.js";
 import { assemblePrompt } from "../services/prompt-assembler.js";
 import type { PromptMode } from "../services/prompt-assembler.js";
-import { MemoryEntryRepo } from "../db/repositories.js";
+import { MemoryEntryRepo, ExecutionResultRepo } from "../db/repositories.js";
 import { runRetrievalPipeline, buildCategoryAwareMemoryText } from "../services/memory-retrieval.js";
 // EL-003: Execution Loop
 import { taskPlanner } from "../services/task-planner.js";
@@ -77,6 +77,16 @@ chatRouter.post("/chat", async (c) => {
         goal: title,
       }).catch((e) => console.error("Failed to create execute task:", e));
 
+      // Memory retrieval for planner context (same pipeline as non-execute path)
+      let memoryEntriesUsed: string[] = [];
+      if (config.memory.enabled) {
+        const mems = await MemoryEntryRepo.getTopForUser(
+          userId,
+          config.memory.maxEntriesToInject
+        );
+        memoryEntriesUsed = mems.map((m) => m.id);
+      }
+
       // Step 1: Planning — decompose goal into an ordered ExecutionPlan
       const plan = await taskPlanner.plan({
         taskId,
@@ -116,6 +126,38 @@ chatRouter.post("/chat", async (c) => {
         taskId,
         loopResult.messages.length * 200, // rough token estimate for now
       ).catch((e) => console.error("Failed to update task:", e));
+
+      // ER-003: Persist execution result (fire-and-forget; don't block the response)
+      // Only persist completed or gracefully-stopped runs; skip hard errors.
+      const persistableReasons = ["completed", "step_cap", "tool_cap", "no_progress"];
+      if (persistableReasons.includes(loopResult.reason)) {
+        const executionStart = Date.now();
+        const stepsSummary: ExecutionStepsSummary = {
+          totalSteps: plan.steps.length,
+          completedSteps: loopResult.completedSteps,
+          toolCallsExecuted: loopResult.toolCallsExecuted,
+          steps: plan.steps.map((s, i) => ({
+            index: i,
+            title: s.title,
+            type: s.type,
+            status: s.status,
+            tool_name: s.tool_name,
+            error: s.error,
+          })),
+        };
+        ExecutionResultRepo.save({
+          task_id: taskId,
+          user_id: userId,
+          session_id: sessionId,
+          final_content: loopResult.finalContent,
+          steps_summary: stepsSummary,
+          memory_entries_used: memoryEntriesUsed,
+          model_used: effectiveSlowModel,
+          tool_count: loopResult.toolCallsExecuted,
+          duration_ms: Date.now() - executionStart,
+          reason: loopResult.reason,
+        }).catch((e) => console.error("Failed to persist execution result:", e));
+      }
 
       return c.json({ message: loopResult.finalContent });
     }
