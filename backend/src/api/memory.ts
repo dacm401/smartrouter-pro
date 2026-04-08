@@ -29,6 +29,9 @@ memoryRouter.post("/", async (c) => {
   if (!content || typeof content !== "string" || content.trim().length === 0) {
     return errorResp(c, "content is required and must be a non-empty string", 400);
   }
+  if (content.length > 2000) {
+    return errorResp(c, "content exceeds 2000 character limit", 400);
+  }
   if (importance !== undefined) {
     const imp = Number(importance);
     if (!Number.isInteger(imp) || imp < 1 || imp > 5) {
@@ -37,6 +40,12 @@ memoryRouter.post("/", async (c) => {
   }
   if (tags !== undefined && !Array.isArray(tags)) {
     return errorResp(c, "tags must be an array of strings", 400);
+  }
+  if (Array.isArray(tags) && tags.length > 10) {
+    return errorResp(c, "maximum 10 tags per entry", 400);
+  }
+  if (Array.isArray(tags) && tags.some((t) => typeof t !== "string" || t.length > 50)) {
+    return errorResp(c, "each tag must be a string of at most 50 characters", 400);
   }
   if (source !== undefined && !VALID_SOURCES.includes(source as typeof VALID_SOURCES[number])) {
     return errorResp(c, `source must be one of: ${VALID_SOURCES.join(" | ")}`, 400);
@@ -116,6 +125,9 @@ memoryRouter
       if (typeof content !== "string" || content.trim().length === 0) {
         return errorResp(c, "content must be a non-empty string", 400);
       }
+      if ((content as string).length > 2000) {
+        return errorResp(c, "content exceeds 2000 character limit", 400);
+      }
       update.content = (content as string).trim();
     }
     if (importance !== undefined) {
@@ -128,6 +140,12 @@ memoryRouter
     if (tags !== undefined) {
       if (!Array.isArray(tags)) {
         return errorResp(c, "tags must be an array of strings", 400);
+      }
+      if ((tags as string[]).length > 10) {
+        return errorResp(c, "maximum 10 tags per entry", 400);
+      }
+      if ((tags as string[]).some((t) => typeof t !== "string" || t.length > 50)) {
+        return errorResp(c, "each tag must be a string of at most 50 characters", 400);
       }
       update.tags = tags as string[];
     }

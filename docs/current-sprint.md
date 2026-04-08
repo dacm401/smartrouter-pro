@@ -91,5 +91,16 @@ At the end of this sprint:
 | MC-001 Memory Data Model + Repository | ✅ Done |
 | MC-002 Memory CRUD APIs | ✅ Done |
 | MC-003 Memory Prompt Injection | ✅ Done |
-| MC-004 Review + Guardrails | Pending |
+| MC-004 Review + Guardrails | ✅ Done |
+
+---
+
+## Sprint 03 Closure
+
+**Status:** Closed ✅  
+**Closed by:** MC-004  
+**Commits:** `483a36b` (MC-001) · `50a0cf4` (MC-002) · `ac44427` (MC-003) · `???????` (MC-004)  
+**Next:** `docs/sprint-03-review.md` → Sprint 04 planning
+
+
 

@@ -5,6 +5,7 @@
 ### API Routes
 - `src/api/chat.ts` — POST /api/chat
 - `src/api/tasks.ts` — task list/detail/summary/traces routes
+- `src/api/memory.ts` — Memory v1 CRUD: POST/GET/PUT/DELETE /v1/memory
 
 ### Services
 - `src/services/prompt-assembler.ts` — prompt assembly for direct/research modes
@@ -16,7 +17,9 @@
 - `src/features/learning-engine.ts` — learning from interactions (stub)
 
 ### Repositories / Data Access
-- `src/db/repositories.ts` — TaskRepo (create, getAll, getById, getSummary, getTraces, etc.)
+- `src/db/repositories.ts` — TaskRepo, DecisionRepo, MemoryRepo, GrowthRepo, MemoryEntryRepo
+  - `MemoryEntryRepo`: create, getById, list, update, delete, getTopForUser
+  - `memory_entries` table: user-scoped, supports preference/fact/context/instruction categories
 
 ### Docs
 - `docs/current-sprint.md` — active sprint
@@ -36,7 +39,8 @@ Brief summary:
 POST /api/chat
   → chat.ts: parse request, create task record
   → router.ts: classify intent + complexity, select model
-  → prompt-assembler.ts: assemble system prompt by mode
+  → MemoryEntryRepo.getTopForUser() — Sprint 03 MC-003: fetch top memories (config-gated)
+  → prompt-assembler.ts: assemble system prompt by mode + taskSummary injection
   → context-manager.ts (services/): compress history, inject system prompt
   → model-gateway.ts: call selected model
   → quality-gate.ts: fast-path quality check + fallback if needed

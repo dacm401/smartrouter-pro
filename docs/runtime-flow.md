@@ -1,7 +1,7 @@
 # Runtime Flow
 
 > **Scope:** Backend only. Documents the actual runtime path of a request through the system.
-> **Last verified:** Sprint 02 TC-008
+> **Last verified:** Sprint 03 MC-004
 > **Principal entrypoint:** `POST /api/chat`
 
 ---
@@ -17,7 +17,8 @@ HTTP POST /api/chat
   │     ├── ② create task record  (fire-and-forget, non-blocking)
   │     ├── ③ intent + complexity analysis
   │     ├── ④ model routing  → { features, routing }
-  │     ├── ⑤ prompt assembly  (PromptAssembler)
+  │     ├── ④b memory injection  (MemoryEntryRepo → taskSummary)  ← Memory v1
+  │     ├── ⑤ prompt assembly  (PromptAssembler, receives taskSummary)
   │     ├── ⑥ context management  (ContextManager)
   │     ├── ⑦ model call  (model-gateway)
   │     ├── ⑧ quality gate  (fast path only)
@@ -33,6 +34,13 @@ HTTP POST /api/chat
         GET /v1/tasks/:id
         GET /v1/tasks/:id/summary
         GET /v1/tasks/:id/traces
+
+  └── /v1/memory routes (Memory v1 — user-scoped CRUD)
+        POST   /v1/memory
+        GET    /v1/memory
+        GET    /v1/memory/:id
+        PUT    /v1/memory/:id
+        DELETE /v1/memory/:id
 ```
 
 ---
@@ -142,7 +150,7 @@ Request-level override: if `body.fast_model` or `body.slow_model` is set, those 
 ### Step 4 — Prompt Assembly
 
 **File:** `backend/src/services/prompt-assembler.ts` → `assemblePrompt()`
-**Inputs:** `mode` (`"direct" | "research"`), `userMessage`
+**Inputs:** `mode` (`"direct" | "research"`), `userMessage`, `taskSummary?`, `maxTaskSummaryTokens?`
 **Output:** `PromptAssemblyOutput`
 
 Sections assembled in order:
@@ -157,14 +165,17 @@ Sections assembled in order:
     direct:  "Mode: direct — Answer directly and concisely..."
     research: "Mode: research — Prioritize structured analysis..."
 
-[3] task_summary  ← optional, injected by Memory v1 in future
-    (currently unused in v1)
+[3] task_summary  ← injected by Memory v1 (Sprint 03 MC-003)
+    "Task context:\n- Goal: User memories:\n- Summary: [preference] ...\n[fact] ..."
 
 systemPrompt = [1] + "\n\n" + [2] (+ "\n\n" + [3] if present)
 userPrompt = userMessage
 ```
 
-**Extension point:** `taskSummary` field is already typed and reserved for Memory v1 injection.
+**Memory injection (MC-003):**
+Before `assemblePrompt()`, `chat.ts` fetches memories via `MemoryEntryRepo.getTopForUser(userId, 5)` (conditional on `config.memory.enabled`). A `taskSummary` object is built and passed in. If `taskSummary` section exceeds `maxTaskSummaryTokens` (default 750 = 5 × 150), it is truncated with a `[...truncated]` marker.
+
+Kill switch: `MEMORY_INJECTION_ENABLED=false` env var disables all memory reads.
 
 ---
 
@@ -327,7 +338,8 @@ Error path: returns `{ error: error.message }` with status 500.
 backend/src/
 ├── api/
 │   ├── chat.ts          ← POST /api/chat, orchestrator
-│   └── tasks.ts         ← GET /v1/tasks/*
+│   ├── tasks.ts         ← GET /v1/tasks/*
+│   └── memory.ts        ← /v1/memory CRUD (Memory v1, MC-002)
 │
 ├── router/
 │   ├── router.ts        ← analyzeAndRoute() entry
@@ -382,15 +394,19 @@ TaskRepo.create()       ← new task record, mode=direct|research
   → TaskRepo.createTrace() × 3    ← classification / routing / response
 ```
 
-### Memory / Learning
+### Memory v1 — User Editable Memory
 
 ```
-MemoryRepo.getIdentity()           ← read before routing
-MemoryRepo.getBehavioralMemories() ← read before routing
-MemoryRepo.saveBehavioralMemory()  ← written by learning engine
-MemoryRepo.upsertIdentity()        ← written by learning engine
-MemoryRepo.decayMemories()        ← periodic cleanup
+POST   /v1/memory                  ← MemoryEntryRepo.create()
+GET    /v1/memory                  ← MemoryEntryRepo.list()
+GET    /v1/memory/:id              ← MemoryEntryRepo.getById()
+PUT    /v1/memory/:id              ← MemoryEntryRepo.update()
+DELETE /v1/memory/:id              ← MemoryEntryRepo.delete()
+
+chat.ts Step 4b                    ← MemoryEntryRepo.getTopForUser() — on every chat
 ```
+
+Injection path: `getTopForUser()` → `taskSummary` → `assemblePrompt()` → `manageContext()` → model.
 
 ### Decision Log
 
@@ -437,7 +453,52 @@ GET /v1/tasks/:task_id/traces
 
 ---
 
-## 6. Known Quirks
+## 6. Memory API Routes (Sprint 03 MC-002)
+
+All memory APIs are user-scoped via `user_id` query param (default: `"default-user"`).
+
+```
+POST /v1/memory
+  body: { category, content, importance?, tags?, source? }
+  → MemoryEntryRepo.create()
+  → Returns: { entry } (201)
+
+GET /v1/memory
+  query: ?user_id, ?category, ?limit (max 100)
+  → MemoryEntryRepo.list()
+  → Returns: { entries[] }
+
+GET /v1/memory/:id
+  query: ?user_id
+  → MemoryEntryRepo.getById()
+  → Returns: { entry } or 404
+
+PUT /v1/memory/:id
+  query: ?user_id
+  body: { content?, importance?, tags?, category? }
+  → MemoryEntryRepo.update()
+  → Returns: { entry } or 404
+
+DELETE /v1/memory/:id
+  query: ?user_id
+  → MemoryEntryRepo.delete()
+  → Returns: 204 or 404
+```
+
+**Guardrails enforced:**
+| Guard | Rule |
+|---|---|
+| `content` length | max 2000 characters |
+| `importance` range | 1–5, coerced |
+| `tags` count | max 10 per entry |
+| `tags` length | max 50 chars per tag |
+| List `limit` | max 100 per request |
+| Injection entries | max 5 (`config.memory.maxEntriesToInject`) |
+| Injection tokens | max 750 (`5 × 150`, enforced in `prompt-assembler.ts`) |
+
+---
+
+## 7. Known Quirks
 
 | # | Description | Impact | Workaround |
 |---|---|---|---|
@@ -456,9 +517,10 @@ GET /v1/tasks/:task_id/traces
 | Priority | Item | Rationale |
 |---|---|---|
 | P1 | Fix SQL placeholder count in `DecisionRepo.save()` | Correctness issue, non-blocking but bad for debugging |
-| P1 | Implement `taskSummary` injection in `assemblePrompt()` | Memory v1 readiness — structure already in place |
+| ~~P1~~ | ~~Implement `taskSummary` injection in `assemblePrompt()`~~ | ✅ Done in Sprint 03 MC-003 |
 | P2 | Add request-level caching for `MemoryRepo.getIdentity()` | Every chat request does a DB round-trip for identity |
 | P2 | Standardize internal time fields (`identity_memories.updated_at`, etc.) | TC-007 only covered outward task APIs |
+| P2 | Add `memory_items_retrieved` to `ContextResult` (currently always 0) | Makes memory injection observable in decision logs |
 | P3 | Behavioral memory batch reads with TTL cache | 50-row scan every chat request won't scale |
 | P3 | Consider moving `quality-gate.ts` into `services/` | It contains business logic, not pure routing |
 | P3 | Document `compressor.ts` compression algorithms | Compression behavior is opaque without reading the code |
@@ -472,4 +534,4 @@ Internal DB storage format remains **Unix milliseconds number** (for now).
 
 ---
 
-_Revised after Sprint 02 TC-008. Supersedes prior informal flow descriptions._
+_Revised after Sprint 03 MC-004. Supersedes prior informal flow descriptions._
