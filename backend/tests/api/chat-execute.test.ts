@@ -78,6 +78,24 @@ const mockFormatExecutionResultsForPlanner = vi.hoisted(() =>
   vi.fn().mockReturnValue("")
 );
 
+// ── ET-003: mutable executionResult config for per-test overrides ─────────────
+// Placed here (hoisted = evaluated before any vi.mock) so the mock factory
+// below can capture a live reference.  Tests call
+//   vi.mocked(mockExecutionResultConfig).enabled = false
+// to flip the kill switch for that test only; vi.fn().mockReset() in
+// beforeEach ensures no cross-test pollution.
+const mockExecutionResultConfig = {
+  enabled: true,
+  maxResults: 10,
+  maxTokensPerResult: 200,
+  allowedReasons: ["completed", "step_cap", "tool_cap", "no_progress"],
+};
+
+const mockConfig = {
+  memory: { enabled: true, maxEntriesToInject: 5 },
+  executionResult: mockExecutionResultConfig,
+};
+
 // ── Module under test ────────────────────────────────────────────────────────
 
 // ── Additional mocks: prevent module-level side-effects from chat.ts imports ──
@@ -158,15 +176,7 @@ vi.mock("../../src/services/execution-result-formatter.js", () => ({
 }));
 
 vi.mock("../../src/config.js", () => ({
-  config: {
-    memory: { enabled: true, maxEntriesToInject: 5 },
-    executionResult: {
-      enabled: true,
-      maxResults: 10,
-      maxTokensPerResult: 200,
-      allowedReasons: ["completed", "step_cap", "tool_cap", "no_progress"],
-    },
-  },
+  config: mockConfig,
 }));
 
 // Hono router test client
@@ -360,5 +370,130 @@ describe("POST /api/chat – execute mode", () => {
     // Planner should also receive the default user_id
     const planCall = mockPlan.mock.calls[0][0];
     expect(planCall.userId).toBe("default-user");
+  });
+});
+
+// ── ET-003: Kill switch / config gating ─────────────────────────────────────
+//
+// Tests that the execution result retrieval + injection pathway is fully gated
+// by config.executionResult.enabled — the kill switch that lets operators
+// disable this entire feature without touching code.
+
+describe("execute mode — executionResult kill switch", () => {
+  beforeEach(() => {
+    // vi.clearAllMocks() wipes call counts but keeps the base implementation.
+    // We override the mocks that happy-path tests touch with mockResolvedValueOnce
+    // so their queues are cleared and the hoisted default implementations apply.
+    vi.clearAllMocks();
+    mockExecutionResultConfig.enabled = true;
+
+    // Re-assign the base implementation to clear any queued mockResolvedValueOnce
+    // values from the happy-path tests; this forces the mock to return the
+    // hoisted default again.
+    mockPlan.mockImplementation(() =>
+      Promise.resolve({
+        taskId: "mock-task-id",
+        steps: [
+          {
+            id: "step-1",
+            title: "Mock Step",
+            type: "tool_call" as const,
+            tool_name: "mock_tool",
+            depends_on: [],
+            status: "pending" as const,
+          },
+        ],
+        currentStepIndex: 0,
+      })
+    );
+    mockLoopRun.mockImplementation(() =>
+      Promise.resolve({
+        finalContent: "✅ Mock execution completed.",
+        reason: "completed" as const,
+        completedSteps: 1,
+        toolCallsExecuted: 2,
+        messages: [{ role: "assistant", content: "✅ Mock execution completed." }],
+      })
+    );
+    mockMemoryEntryRepo.getTopForUser.mockImplementation(() =>
+      Promise.resolve([
+        { id: "mem-1", content: "User prefers dark mode." },
+        { id: "mem-2", content: "Always start with memory retrieval." },
+      ])
+    );
+    mockTaskRepo.create.mockImplementation(() => Promise.resolve(undefined));
+    mockTaskRepo.createTrace.mockImplementation(() => Promise.resolve(undefined));
+    mockTaskRepo.updateExecution.mockImplementation(() => Promise.resolve(undefined));
+  });
+
+  it("skips retrieval and injection when config.executionResult.enabled is false", async () => {
+    // Arrange: kill switch OFF — mutating the shared ref is safe because
+    // beforeEach resets it before every test.
+    mockExecutionResultConfig.enabled = false;
+
+    // Act
+    const res = await POSTChat({ message: "test", execute: true, user_id: "user-kill" });
+
+    // Assert — happy path still works
+    expect(res.status).toBe(200);
+    const json = await res.json<{ message?: string }>();
+    expect(json.message).toBe("✅ Mock execution completed.");
+
+    // Retrieval layer NOT called
+    expect(mockExecutionResultRepo.listByUser).not.toHaveBeenCalled();
+
+    // Formatter NOT called
+    expect(mockFormatExecutionResultsForPlanner).not.toHaveBeenCalled();
+
+    // Planner still called (main chain intact)
+    expect(mockPlan).toHaveBeenCalledOnce();
+
+    // Planner received empty executionResultContext (disabled → "" stays empty)
+    const planCall = mockPlan.mock.calls[0][0];
+    expect(planCall.executionResultContext).toBe("");
+  });
+
+  it("returns 200 and does not block response when listByUser throws", async () => {
+    // Arrange: listByUser throws — simulate DB failure during retrieval
+    mockExecutionResultRepo.listByUser.mockRejectedValueOnce(
+      new Error("Connection refused")
+    );
+
+    // Act
+    const res = await POSTChat({ message: "test", execute: true });
+
+    // Assert — main response is unaffected
+    expect(res.status).toBe(200);
+    const json = await res.json<{ message?: string }>();
+    expect(json.message).toBe("✅ Mock execution completed.");
+
+    // Execution loop still ran
+    expect(mockLoopRun).toHaveBeenCalledOnce();
+
+    // Planner received empty context (retrieval failed silently → stays "")
+    const planCall = mockPlan.mock.calls[0][0];
+    expect(planCall.executionResultContext).toBe("");
+  });
+
+  it("returns 200 and does not block response when formatter throws", async () => {
+    // Arrange: formatter throws — should not propagate to user
+    mockFormatExecutionResultsForPlanner.mockImplementationOnce(() => {
+      throw new Error("Unexpected parse error");
+    });
+
+    // Act
+    const res = await POSTChat({ message: "test", execute: true });
+
+    // Assert — main response is unaffected
+    expect(res.status).toBe(200);
+    const json = await res.json<{ message?: string }>();
+    expect(json.message).toBe("✅ Mock execution completed.");
+
+    // Execution loop still ran
+    expect(mockLoopRun).toHaveBeenCalledOnce();
+
+    // Planner received empty context (formatter failed before injection)
+    const planCall2 = mockPlan.mock.calls[0][0];
+    expect(planCall2.executionResultContext).toBe("");
   });
 });
