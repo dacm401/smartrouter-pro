@@ -1,10 +1,26 @@
 import { defineConfig } from "vitest/config";
+import { resolve } from "path";
+
+const testDbUrl =
+  process.env.DATABASE_URL?.replace(/\/[^/]+\?/, "/smartrouter_test?") ??
+  `postgresql://postgres:postgres@localhost:5432/smartrouter_test`;
 
 export default defineConfig({
   test: {
-    globals: true,           // vi, describe, it, expect available globally
-    environment: "node",      // Node.js environment
+    globals: true,
+    environment: "node",
     include: ["tests/**/*.test.ts"],
+    env: {
+      // Override DATABASE_URL before any app module is loaded.
+      // The harness connects to smartrouter_test and loads the schema.
+      DATABASE_URL: testDbUrl,
+    },
+    // Runs once before all tests — creates test DB and loads schema.
+    // setupFiles runs in a separate VM context BEFORE the test bundle,
+    // so process.env changes here affect how app modules initialize.
+    setupFiles: ["./tests/db/setup.ts"],
+    // Runs once after all tests — closes the test connection pool.
+    globalTeardown: "./tests/db/teardown.ts",
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
