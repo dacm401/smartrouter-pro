@@ -114,9 +114,9 @@ export const MemoryRepo = {
 
   async saveBehavioralMemory(mem: BehavioralMemory): Promise<void> {
     await query(
-      `INSERT INTO behavioral_memories (id, user_id, trigger_pattern, observation, learned_action, strength, source_decision_ids)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [mem.id, mem.user_id, mem.trigger_pattern, mem.observation, mem.learned_action, mem.strength, mem.source_decision_ids]
+      `INSERT INTO behavioral_memories (id, user_id, trigger_pattern, observation, learned_action, strength, reinforcement_count, last_activated, source_decision_ids)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [mem.id, mem.user_id, mem.trigger_pattern, mem.observation, mem.learned_action, mem.strength, mem.reinforcement_count, new Date(mem.last_activated).toISOString(), mem.source_decision_ids]
     );
   },
 
