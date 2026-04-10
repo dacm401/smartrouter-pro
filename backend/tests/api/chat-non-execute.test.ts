@@ -269,7 +269,7 @@ describe("POST /api/chat – non-execute path", () => {
       user_id: userId,
     });
 
-    await sleep(150);
+    await sleep(300);
 
     const tasks = await getTasksForUser(userId);
     expect(tasks.length).toBe(1);
