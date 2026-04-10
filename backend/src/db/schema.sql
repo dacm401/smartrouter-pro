@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS decision_logs (
   did_fallback      BOOLEAN DEFAULT FALSE,
   fallback_reason   TEXT,
   feedback_type     VARCHAR(50),
-  feedback_score    SMALLINT,
+  feedback_score    NUMERIC(4,1),  -- supports fractional values (e.g. "edited" = -0.5)
   routing_correct   BOOLEAN,
   cost_saved_vs_slow DECIMAL(10, 6),
   created_at        TIMESTAMPTZ DEFAULT NOW()

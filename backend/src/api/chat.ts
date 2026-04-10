@@ -326,7 +326,23 @@ chatRouter.post("/chat", async (c) => {
 });
 
 chatRouter.post("/feedback", async (c) => {
-  const { decision_id, feedback_type } = await c.req.json();
+  let decision_id: string;
+  let feedback_type: string;
+  try {
+    const body = await c.req.json();
+    decision_id = body.decision_id;
+    feedback_type = body.feedback_type;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+
+  if (!decision_id) return c.json({ error: "decision_id is required" }, 400);
+  if (!feedback_type) return c.json({ error: "feedback_type is required" }, 400);
+
+  const { query } = await import("../db/connection.js");
+  const exists = await query(`SELECT id FROM decision_logs WHERE id=$1`, [decision_id]);
+  if (exists.rowCount === 0) return c.json({ error: "decision not found" }, 404);
+
   const { recordFeedback } = await import("../features/feedback-collector.js");
   await recordFeedback(decision_id, feedback_type);
   return c.json({ success: true });

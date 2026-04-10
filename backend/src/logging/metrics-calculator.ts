@@ -38,6 +38,6 @@ function mapDecisionRow(row: any): any {
     routing: { router_version: row.router_version, scores: { fast: row.fast_score, slow: row.slow_score }, confidence: row.confidence, selected_model: row.selected_model, selected_role: row.selected_role, selection_reason: row.selection_reason },
     context: { original_tokens: row.context_original_tokens, compressed_tokens: row.context_compressed_tokens, compression_level: row.compression_level, compression_ratio: row.compression_ratio },
     execution: { model_used: row.model_used, input_tokens: row.exec_input_tokens, output_tokens: row.exec_output_tokens, total_cost_usd: parseFloat(row.total_cost_usd), latency_ms: row.latency_ms, did_fallback: row.did_fallback },
-    feedback: row.feedback_type ? { type: row.feedback_type, score: row.feedback_score } : undefined,
+    feedback: row.feedback_type ? { type: row.feedback_type, score: Number(row.feedback_score) } : undefined,
   };
 }

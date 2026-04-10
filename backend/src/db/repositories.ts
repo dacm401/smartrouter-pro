@@ -15,7 +15,7 @@ export const DecisionRepo = {
         compression_level, compression_ratio,
         model_used, exec_input_tokens, exec_output_tokens,
         total_cost_usd, latency_ms, did_fallback, fallback_reason
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
       [
         d.id, d.user_id, d.session_id,
         d.input_features.raw_query.substring(0, 200),
@@ -53,7 +53,7 @@ export const DecisionRepo = {
         COALESCE(SUM(cost_saved_vs_slow), 0)::float as saved_cost,
         COALESCE(AVG(latency_ms), 0)::int as avg_latency,
         CASE WHEN COUNT(*) FILTER (WHERE feedback_score IS NOT NULL) > 0
-          THEN (COUNT(*) FILTER (WHERE feedback_score > 0)::float / COUNT(*) FILTER (WHERE feedback_score IS NOT NULL)::float * 100)
+          THEN ROUND(COUNT(*) FILTER (WHERE feedback_score > 0)::float / COUNT(*) FILTER (WHERE feedback_score IS NOT NULL)::float * 100)
           ELSE 0 END as satisfaction_rate
       FROM decision_logs WHERE user_id=$1 AND created_at >= CURRENT_DATE`,
       [userId]

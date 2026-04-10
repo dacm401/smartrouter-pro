@@ -1,0 +1,543 @@
+/**
+ * Sprint 12 P2: DecisionRepo Integration Tests
+ *
+ * Validates real SQL contracts for all 5 DecisionRepo methods:
+ *   - save()                    → 27-col INSERT, full DecisionRecord payload
+ *   - updateFeedback()          → UPDATE feedback_type + feedback_score
+ *   - getRecent()                → SELECT ORDER BY created_at DESC LIMIT
+ *   - getTodayStats()            → COUNT/SUM/AVG/FILTER/COALESCE/CASE WHEN aggregation
+ *   - getRoutingAccuracyHistory() → date grouping, conditional accuracy %
+ *
+ * Infrastructure: tests/db/harness.ts
+ *   Setup:  DATABASE_URL → smartrouter_test (vitest env)
+ *   Schema: CREATE TABLE IF NOT EXISTS on startup (idempotent)
+ *   Isolation: beforeEach → truncateTables() → COMMIT
+ *
+ * Note: seedDecision() uses raw INSERT (not DecisionRepo.save()) to avoid
+ * a chicken-and-egg problem — we need fixture rows BEFORE we test getRecent.
+ */
+
+import { v4 as uuid } from "uuid";
+import { DecisionRepo } from "../../src/db/repositories.js";
+import { truncateTables } from "../db/harness.js";
+import { query } from "../../src/db/connection.js";
+import type { DecisionRecord } from "../../src/types/index.js";
+
+// ── Seed helpers ──────────────────────────────────────────────────────────────
+
+function makeRecord(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
+  const id = overrides.id ?? uuid();
+  return {
+    id,
+    user_id: overrides.user_id ?? uuid(),
+    session_id: overrides.session_id ?? uuid(),
+    timestamp: Date.now(),
+    input_features: {
+      raw_query: "test query for decision routing",
+      token_count: 50,
+      complexity_score: 2,
+      has_code: false,
+      has_math: false,
+      intent: "simple_qa",
+      ...(overrides.input_features ?? {}),
+    },
+    routing: {
+      router_version: "v1",
+      scores: { fast: 0.8, slow: 0.3 },
+      confidence: 0.9,
+      selected_model: "gpt-4o-mini",
+      selected_role: "fast",
+      selection_reason: "score_above_threshold",
+      ...(overrides.routing ?? {}),
+    },
+    context: {
+      original_tokens: 100,
+      compressed_tokens: 80,
+      compression_level: "med",
+      compression_ratio: 0.8,
+      ...(overrides.context ?? {}),
+    },
+    execution: {
+      model_used: "gpt-4o-mini",
+      input_tokens: 40,
+      output_tokens: 20,
+      total_cost_usd: 0.001,
+      latency_ms: 120,
+      did_fallback: false,
+      fallback_reason: null,
+      ...(overrides.execution ?? {}),
+    },
+    ...overrides,
+  };
+}
+
+/**
+ * Insert a decision_log row via raw SQL.
+ * Fills all 28 cols used by getTodayStats / getRoutingAccuracyHistory tests.
+ *
+ * Cols: id, user_id, session_id, query_preview, intent, complexity_score,
+ *   input_token_count, has_code, has_math,
+ *   router_version, fast_score, slow_score, confidence,
+ *   selected_model, selected_role, selection_reason,
+ *   context_original_tokens, context_compressed_tokens,
+ *   compression_level, compression_ratio,
+ *   model_used, exec_input_tokens, exec_output_tokens,
+ *   total_cost_usd, latency_ms, did_fallback,
+ *   cost_saved_vs_slow, feedback_score, routing_correct
+ */
+async function seedDecision(opts: {
+  userId: string;
+  sessionId?: string;
+  selectedRole?: "fast" | "slow";
+  didFallback?: boolean;
+  totalCostUsd?: number;
+  costSavedVsSlow?: number;
+  feedbackScore?: number | null;
+  routingCorrect?: boolean | null;
+}): Promise<string> {
+  const id = uuid();
+  const sessionId = opts.sessionId ?? uuid();
+  await query(
+    `INSERT INTO decision_logs (
+      id, user_id, session_id, query_preview, intent, complexity_score,
+      input_token_count, has_code, has_math,
+      router_version, fast_score, slow_score, confidence,
+      selected_model, selected_role, selection_reason,
+      context_original_tokens, context_compressed_tokens,
+      compression_level, compression_ratio,
+      model_used, exec_input_tokens, exec_output_tokens,
+      total_cost_usd, latency_ms, did_fallback,
+      cost_saved_vs_slow, feedback_score, routing_correct
+    ) VALUES (
+      $1,$2,$3,'test query','simple_qa',2,
+      50,false::boolean,false::boolean,
+      'v1',0.8,0.3,0.9,
+      'gpt-4o-mini',$4,'score_above_threshold',
+      100,80,'med',0.8,
+      'gpt-4o-mini',40,20,
+      $5,$6,$7::boolean,
+      $8,$9,$10::boolean
+    )`,
+    [
+      id, opts.userId, sessionId,
+      opts.selectedRole ?? "fast",
+      opts.totalCostUsd ?? 0.001,
+      120,
+      opts.didFallback ?? false,
+      opts.costSavedVsSlow ?? 0.002,
+      opts.feedbackScore ?? null,
+      opts.routingCorrect ?? null,
+    ]
+  );
+  return id;
+}
+
+// ── Test suites ───────────────────────────────────────────────────────────────
+
+const USER = uuid();
+
+beforeEach(async () => {
+  await truncateTables();
+});
+
+// ── save() ────────────────────────────────────────────────────────────────────
+
+describe("save()", () => {
+  it("inserts a full DecisionRecord and it is retrievable", async () => {
+    const record = makeRecord({ user_id: USER });
+    await DecisionRepo.save(record);
+
+    const result = await query(`SELECT * FROM decision_logs WHERE id=$1`, [record.id]);
+    expect(result.rows.length).toBe(1);
+    expect(result.rows[0].id).toBe(record.id);
+    expect(result.rows[0].user_id).toBe(USER);
+    expect(result.rows[0].query_preview).toBe("test query for decision routing");
+    expect(result.rows[0].intent).toBe("simple_qa");
+    expect(result.rows[0].fast_score).toBe(0.8);
+    expect(result.rows[0].slow_score).toBe(0.3);
+    expect(result.rows[0].selected_role).toBe("fast");
+    expect(result.rows[0].selected_model).toBe("gpt-4o-mini");
+    expect(result.rows[0].exec_input_tokens).toBe(40);
+    expect(result.rows[0].exec_output_tokens).toBe(20);
+    expect(parseFloat(result.rows[0].total_cost_usd)).toBeCloseTo(0.001, 5);
+    expect(result.rows[0].latency_ms).toBe(120);
+    expect(result.rows[0].did_fallback).toBe(false);
+  });
+
+  it("truncates raw_query to 200 characters", async () => {
+    const longQuery = "a".repeat(300);
+    const record = makeRecord({
+      input_features: { raw_query: longQuery, token_count: 50, complexity_score: 2, has_code: false, has_math: false, intent: "test" },
+    });
+    await DecisionRepo.save(record);
+
+    const result = await query(`SELECT query_preview FROM decision_logs WHERE id=$1`, [record.id]);
+    expect(result.rows[0].query_preview.length).toBe(200);
+  });
+
+  it("saves fallback decision with null fallback_reason", async () => {
+    const record = makeRecord({
+      execution: {
+        model_used: "gpt-4o-mini",
+        input_tokens: 10, output_tokens: 5,
+        total_cost_usd: 0.0005, latency_ms: 80,
+        did_fallback: true, fallback_reason: null,
+      },
+    });
+    await DecisionRepo.save(record);
+
+    const result = await query(`SELECT did_fallback, fallback_reason FROM decision_logs WHERE id=$1`, [record.id]);
+    expect(result.rows[0].did_fallback).toBe(true);
+    expect(result.rows[0].fallback_reason).toBeNull();
+  });
+
+  it("saves slow role decision", async () => {
+    const record = makeRecord({
+      routing: {
+        router_version: "v1", scores: { fast: 0.3, slow: 0.8 },
+        confidence: 0.9, selected_model: "gpt-4o",
+        selected_role: "slow", selection_reason: "complexity_above_threshold",
+      },
+    });
+    await DecisionRepo.save(record);
+
+    const result = await query(`SELECT selected_role, selected_model FROM decision_logs WHERE id=$1`, [record.id]);
+    expect(result.rows[0].selected_role).toBe("slow");
+    expect(result.rows[0].selected_model).toBe("gpt-4o");
+  });
+
+  it("throws on duplicate id (DB-level constraint)", async () => {
+    const record = makeRecord({ user_id: USER });
+    await DecisionRepo.save(record);
+    await expect(DecisionRepo.save(record)).rejects.toThrow();
+  });
+});
+
+// ── updateFeedback() ───────────────────────────────────────────────────────────
+
+describe("updateFeedback()", () => {
+  it("sets feedback_type and feedback_score on existing row", async () => {
+    const id = await seedDecision({ userId: USER });
+    await DecisionRepo.updateFeedback(id, "thumbs_up", 1);
+
+    const result = await query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [id]);
+    expect(result.rows[0].feedback_type).toBe("thumbs_up");
+    expect(Number(result.rows[0].feedback_score)).toBe(1);
+  });
+
+  it("overwrites previous feedback with new values", async () => {
+    const id = await seedDecision({ userId: USER });
+    await DecisionRepo.updateFeedback(id, "thumbs_up", 1);
+    await DecisionRepo.updateFeedback(id, "thumbs_down", 0);
+
+    const result = await query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [id]);
+    expect(result.rows[0].feedback_type).toBe("thumbs_down");
+    expect(Number(result.rows[0].feedback_score)).toBe(0);
+  });
+
+  it("only updates the target row (others remain null)", async () => {
+    const id1 = await seedDecision({ userId: USER, feedbackScore: 1 });
+    const id2 = await seedDecision({ userId: USER, feedbackScore: null });
+    await DecisionRepo.updateFeedback(id1, "thumbs_down", 0);
+
+    const [r1, r2] = await Promise.all([
+      query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [id1]),
+      query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [id2]),
+    ]);
+    expect(r1.rows[0].feedback_type).toBe("thumbs_down");
+    expect(Number(r1.rows[0].feedback_score)).toBe(0);
+    expect(r2.rows[0].feedback_type).toBeNull();
+    expect(r2.rows[0].feedback_score).toBeNull();
+  });
+
+  it("is a no-op on non-existent id (no error thrown)", async () => {
+    await expect(DecisionRepo.updateFeedback(uuid(), "thumbs_up", 1)).resolves.toBeUndefined();
+  });
+});
+
+// ── getRecent() ───────────────────────────────────────────────────────────────
+
+describe("getRecent()", () => {
+  it("returns empty array when no decisions exist", async () => {
+    const results = await DecisionRepo.getRecent(USER);
+    expect(results).toEqual([]);
+  });
+
+  it("returns decisions ordered by created_at DESC", async () => {
+    const id1 = await seedDecision({ userId: USER });
+    await new Promise((r) => setTimeout(r, 10));
+    const id2 = await seedDecision({ userId: USER });
+    await new Promise((r) => setTimeout(r, 10));
+    const id3 = await seedDecision({ userId: USER });
+
+    const results = await DecisionRepo.getRecent(USER);
+    expect(results.length).toBe(3);
+    expect(results[0].id).toBe(id3);
+    expect(results[1].id).toBe(id2);
+    expect(results[2].id).toBe(id1);
+  });
+
+  it("respects the limit parameter", async () => {
+    for (let i = 0; i < 5; i++) await seedDecision({ userId: USER });
+
+    const results = await DecisionRepo.getRecent(USER, 3);
+    expect(results.length).toBe(3);
+  });
+
+  it("defaults limit to 20", async () => {
+    for (let i = 0; i < 25; i++) await seedDecision({ userId: USER });
+
+    const results = await DecisionRepo.getRecent(USER);
+    expect(results.length).toBe(20);
+  });
+
+  it("returns only the target user's decisions", async () => {
+    const OTHER = uuid();
+    await seedDecision({ userId: OTHER });
+    const id2 = await seedDecision({ userId: USER });
+    const id3 = await seedDecision({ userId: USER });
+
+    const results = await DecisionRepo.getRecent(USER);
+    const ids = results.map((r: any) => r.id);
+    expect(ids).toContain(id2);
+    expect(ids).toContain(id3);
+    // No duplicates, no OTHER's id
+    expect(new Set(ids).size).toBe(ids.length);
+    const otherIds = (await query(`SELECT id FROM decision_logs WHERE user_id=$1`, [OTHER])).rows.map((r: any) => r.id);
+    ids.forEach((id: string) => expect(otherIds).not.toContain(id));
+  });
+});
+
+// ── getTodayStats() ───────────────────────────────────────────────────────────
+
+describe("getTodayStats()", () => {
+  it("returns zero stats when no decisions exist", async () => {
+    const stats = await DecisionRepo.getTodayStats(USER);
+
+    expect(stats.total_requests).toBe(0);
+    expect(stats.fast_count).toBe(0);
+    expect(stats.slow_count).toBe(0);
+    expect(stats.fallback_count).toBe(0);
+    expect(stats.total_tokens).toBe(0);
+    expect(stats.total_cost).toBe(0);
+    expect(stats.saved_cost).toBe(0);
+    expect(stats.avg_latency).toBe(0);
+    expect(stats.satisfaction_rate).toBe(0);
+  });
+
+  it("counts fast and slow decisions correctly", async () => {
+    await seedDecision({ userId: USER, selectedRole: "fast" });
+    await seedDecision({ userId: USER, selectedRole: "fast" });
+    await seedDecision({ userId: USER, selectedRole: "slow" });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.total_requests).toBe(3);
+    expect(stats.fast_count).toBe(2);
+    expect(stats.slow_count).toBe(1);
+  });
+
+  it("sums total_tokens correctly", async () => {
+    // seedDecision uses 40+20=60 tokens per row by default
+    await seedDecision({ userId: USER });
+    await seedDecision({ userId: USER });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.total_tokens).toBe(120);
+  });
+
+  it("sums total_cost correctly", async () => {
+    await seedDecision({ userId: USER, totalCostUsd: 0.005 });
+    await seedDecision({ userId: USER, totalCostUsd: 0.003 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.total_cost).toBeCloseTo(0.008, 5);
+  });
+
+  it("sums saved_cost correctly", async () => {
+    await seedDecision({ userId: USER, costSavedVsSlow: 0.01 });
+    await seedDecision({ userId: USER, costSavedVsSlow: 0.02 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.saved_cost).toBeCloseTo(0.03, 4);
+  });
+
+  it("satisfaction_rate is 0 when no feedback exists", async () => {
+    await seedDecision({ userId: USER });
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.satisfaction_rate).toBe(0);
+  });
+
+  it("satisfaction_rate is 100 when all feedback is positive", async () => {
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.satisfaction_rate).toBe(100);
+  });
+
+  it("satisfaction_rate is 67 with 2 positive + 1 negative", async () => {
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 0 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // 2 positive / 3 total = 66.67% → ROUND → 67
+    expect(stats.satisfaction_rate).toBe(67);
+  });
+
+  it("ignores decisions from other users", async () => {
+    const OTHER = uuid();
+    await seedDecision({ userId: OTHER });
+    await seedDecision({ userId: USER });
+
+    const [otherStats, userStats] = await Promise.all([
+      DecisionRepo.getTodayStats(OTHER),
+      DecisionRepo.getTodayStats(USER),
+    ]);
+    expect(otherStats.total_requests).toBe(1);
+    expect(userStats.total_requests).toBe(1);
+  });
+
+  it("counts fallback decisions", async () => {
+    await seedDecision({ userId: USER, didFallback: true });
+    await seedDecision({ userId: USER, didFallback: false });
+    await seedDecision({ userId: USER, didFallback: true });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.fallback_count).toBe(2);
+  });
+
+  it("calculates avg_latency as integer", async () => {
+    // seedDecision uses latency_ms=120 by default, all rows = 120
+    await seedDecision({ userId: USER });
+    await seedDecision({ userId: USER });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.avg_latency).toBe(120);
+  });
+});
+
+// ── getRoutingAccuracyHistory() ───────────────────────────────────────────────
+
+describe("getRoutingAccuracyHistory()", () => {
+  it("returns empty array when no decisions exist", async () => {
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER);
+    expect(history).toEqual([]);
+  });
+
+  it("groups decisions by created_at::date", async () => {
+    // Today's decisions (default created_at = now)
+    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    // Default seed uses created_at = CURRENT_TIMESTAMP, so today's row exists
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0]).toHaveProperty("date");
+    expect(history[0]).toHaveProperty("value");
+  });
+
+  it("returns 100% accuracy when all routing_correct = true", async () => {
+    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    // Seed rows have created_at = NOW(), so first entry is today
+    expect(history[0].value).toBe(100);
+  });
+
+  it("returns 0% accuracy when all routing_correct = false", async () => {
+    await seedDecision({ userId: USER, routingCorrect: false });
+    await seedDecision({ userId: USER, routingCorrect: false });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0].value).toBe(0);
+  });
+
+  it("returns 50% accuracy with mixed routing_correct", async () => {
+    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: USER, routingCorrect: false });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    // 1 true / 2 total = 50% → Math.round(50 * 10) / 10 = 50
+    expect(history[0].value).toBe(50);
+  });
+
+  it("excludes rows with null routing_correct from accuracy calc", async () => {
+    // Use explicit raw SQL to guarantee correct routing_correct values.
+    // seedDecision uses seed helper which may have parameter binding issues with null.
+    const [id1, id2, id3] = [uuid(), uuid(), uuid()];
+    await query(
+      `INSERT INTO decision_logs
+        (id, user_id, session_id, routing_correct, created_at)
+       VALUES ($1,$2,$3,true::boolean,NOW()),
+              ($4,$2,$5,false::boolean,NOW()),
+              ($6,$2,$7,NULL::boolean,NOW())`,
+      [id1, USER, uuid(), id2, uuid(), id3, uuid()]
+    );
+
+    // accuracy = COUNT(true) / COUNT(IS NOT NULL) = 1/2 = 50%
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0].value).toBe(50);
+  });
+
+  it("ignores decisions from other users", async () => {
+    const OTHER = uuid();
+    await seedDecision({ userId: OTHER, routingCorrect: true });
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    // Only USER's record counts → 100%
+    expect(history[0].value).toBe(100);
+  });
+
+  it("respects the days window parameter", async () => {
+    // Insert a row with a created_at far in the past
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 60);
+    await query(
+      `INSERT INTO decision_logs (id, user_id, session_id, query_preview, intent, complexity_score,
+        input_token_count, has_code, has_math, router_version, fast_score, slow_score, confidence,
+        selected_model, selected_role, selection_reason, context_original_tokens, context_compressed_tokens,
+        compression_level, compression_ratio, model_used, exec_input_tokens, exec_output_tokens,
+        total_cost_usd, latency_ms, did_fallback, cost_saved_vs_slow, feedback_score, routing_correct, created_at)
+       VALUES ($1,$2,$3,'q','simple_qa',2,50,false,false,'v1',0.8,0.3,0.9,
+        'gpt-4o-mini','fast','score_above_threshold',100,80,'med',0.8,
+        'gpt-4o-mini',40,20,0.001,120,false,0.002,null,null,$4)`,
+      [uuid(), USER, uuid(), pastDate]
+    );
+    // Today's record
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history30 = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    const history60 = await DecisionRepo.getRoutingAccuracyHistory(USER, 60);
+
+    // 30-day window: only today's record (1 row)
+    expect(history30.length).toBeGreaterThanOrEqual(1);
+    // 60-day window: both records (2 rows)
+    expect(history60.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("returns dates in ISO string format YYYY-MM-DD", async () => {
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    history.forEach((h: any) => {
+      expect(h.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  it("returns entries ordered by date ASC", async () => {
+    // Today's row
+    await seedDecision({ userId: USER, routingCorrect: true });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    for (let i = 1; i < history.length; i++) {
+      expect(history[i].date >= history[i - 1].date).toBe(true);
+    }
+  });
+});
