@@ -20,6 +20,9 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/api/**/*.test.ts"],
+    // API integration tests share a real DB; run files sequentially to prevent
+    // one file's beforeEach truncateTables() from racing another file's seeding.
+    fileParallelism: false,
     env: {
       DATABASE_URL: testDbUrl,
     },

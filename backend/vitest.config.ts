@@ -15,6 +15,9 @@ export default defineConfig({
       // Reason: each repo test file needs its own worker to avoid module-level
       // pool contamination (connection.ts _pool is shared across files in same worker).
       "tests/repositories/**",
+      // API integration tests run in SEPARATE vitest process (npm run test:api).
+      // They use real repos + real DB and must not share a worker with mock tests.
+      "tests/api/**",
     ],
     env: {
       // Override DATABASE_URL before any app module is loaded.

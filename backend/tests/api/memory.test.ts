@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Hono } from "hono";
 import { memoryRouter } from "../../src/api/memory.js";
-import { truncateTables, resetAppPool } from "../db/harness.js";
+import { truncateTables } from "../db/harness.js";
 
 const TEST_USER_A = "si001-user-a";
 const TEST_USER_B = "si001-user-b";
@@ -67,7 +67,6 @@ async function createEntry(overrides: Record<string, unknown> = {}, userId = TES
 describe("POST /v1/memory", () => {
   beforeEach(async () => {
     await truncateTables();
-    await resetAppPool();
   });
 
   it("201 — creates entry with required fields only", async () => {
@@ -259,7 +258,6 @@ describe("POST /v1/memory", () => {
 describe("GET /v1/memory", () => {
   beforeEach(async () => {
     await truncateTables();
-    await resetAppPool();
   });
 
   it("200 — returns entries for the specified user", async () => {
@@ -356,7 +354,6 @@ describe("GET /v1/memory", () => {
 describe("GET /v1/memory/:id", () => {
   beforeEach(async () => {
     await truncateTables();
-    await resetAppPool();
   });
 
   it("200 — returns entry by id", async () => {
@@ -393,7 +390,6 @@ describe("GET /v1/memory/:id", () => {
 describe("PUT /v1/memory/:id", () => {
   beforeEach(async () => {
     await truncateTables();
-    await resetAppPool();
   });
 
   it("200 — updates content", async () => {
@@ -551,7 +547,6 @@ describe("PUT /v1/memory/:id", () => {
 describe("DELETE /v1/memory/:id", () => {
   beforeEach(async () => {
     await truncateTables();
-    await resetAppPool();
   });
 
   it("204 — deletes existing entry", async () => {
