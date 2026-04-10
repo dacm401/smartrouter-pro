@@ -6,7 +6,7 @@
  *   - updateFeedback()          → UPDATE feedback_type + feedback_score
  *   - getRecent()                → SELECT ORDER BY created_at DESC LIMIT
  *   - getTodayStats()            → COUNT/SUM/AVG/FILTER/COALESCE/CASE WHEN aggregation
- *   - getRoutingAccuracyHistory() → date grouping, conditional accuracy %
+ *   - getRoutingAccuracyHistory() → date grouping, satisfaction % from feedback_score (P3)
  *
  * Infrastructure: tests/db/harness.ts
  *   Setup:  DATABASE_URL → smartrouter_test (vitest env)
@@ -418,7 +418,7 @@ describe("getTodayStats()", () => {
 
 // ── getRoutingAccuracyHistory() ───────────────────────────────────────────────
 
-describe("getRoutingAccuracyHistory()", () => {
+describe("getRoutingAccuracyHistory() — P3: satisfaction rate from feedback_score (not routing_correct)", () => {
   it("returns empty array when no decisions exist", async () => {
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER);
     expect(history).toEqual([]);
@@ -426,8 +426,9 @@ describe("getRoutingAccuracyHistory()", () => {
 
   it("groups decisions by created_at::date", async () => {
     // Today's decisions (default created_at = now)
-    await seedDecision({ userId: USER, routingCorrect: true });
-    await seedDecision({ userId: USER, routingCorrect: true });
+    // P3: now uses feedback_score > 0 / COUNT(feedback_score IS NOT NULL)
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     // Default seed uses created_at = CURRENT_TIMESTAMP, so today's row exists
@@ -436,58 +437,61 @@ describe("getRoutingAccuracyHistory()", () => {
     expect(history[0]).toHaveProperty("value");
   });
 
-  it("returns 100% accuracy when all routing_correct = true", async () => {
-    await seedDecision({ userId: USER, routingCorrect: true });
-    await seedDecision({ userId: USER, routingCorrect: true });
+  it("returns 100% when all feedback_score > 0 (P3: satisfaction rate from feedback)", async () => {
+    // P3: satisfaction = COUNT(feedback_score > 0) / COUNT(feedback_score IS NOT NULL)
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     expect(history.length).toBeGreaterThanOrEqual(1);
-    // Seed rows have created_at = NOW(), so first entry is today
     expect(history[0].value).toBe(100);
   });
 
-  it("returns 0% accuracy when all routing_correct = false", async () => {
-    await seedDecision({ userId: USER, routingCorrect: false });
-    await seedDecision({ userId: USER, routingCorrect: false });
+  it("returns 0% when all feedback_score <= 0", async () => {
+    // P3: feedback_score <= 0 → not positive → 0%
+    await seedDecision({ userId: USER, feedbackScore: 0 });
+    await seedDecision({ userId: USER, feedbackScore: -1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     expect(history.length).toBeGreaterThanOrEqual(1);
     expect(history[0].value).toBe(0);
   });
 
-  it("returns 50% accuracy with mixed routing_correct", async () => {
-    await seedDecision({ userId: USER, routingCorrect: true });
-    await seedDecision({ userId: USER, routingCorrect: false });
+  it("returns 50% satisfaction with mixed feedback (1 pos + 1 neg)", async () => {
+    // P3: positive_count=1, total_with_feedback=2 → 50%
+    await seedDecision({ userId: USER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 0 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     expect(history.length).toBeGreaterThanOrEqual(1);
-    // 1 true / 2 total = 50% → Math.round(50 * 10) / 10 = 50
+    // 1 positive / 2 total = 50% → Math.round(50 * 10) / 10 = 50
     expect(history[0].value).toBe(50);
   });
 
-  it("excludes rows with null routing_correct from accuracy calc", async () => {
-    // Use explicit raw SQL to guarantee correct routing_correct values.
-    // seedDecision uses seed helper which may have parameter binding issues with null.
+  it("excludes rows with null feedback_score from satisfaction calc (P3)", async () => {
+    // P3: satisfaction = COUNT(feedback_score > 0) / COUNT(feedback_score IS NOT NULL)
+    // Null feedback_score rows are excluded from both numerator and denominator.
     const [id1, id2, id3] = [uuid(), uuid(), uuid()];
     await query(
       `INSERT INTO decision_logs
-        (id, user_id, session_id, routing_correct, created_at)
-       VALUES ($1,$2,$3,true::boolean,NOW()),
-              ($4,$2,$5,false::boolean,NOW()),
-              ($6,$2,$7,NULL::boolean,NOW())`,
+        (id, user_id, session_id, feedback_score, created_at)
+       VALUES ($1,$2,$3,1,NOW()),
+              ($4,$2,$5,0,NOW()),
+              ($6,$2,$7,NULL,NOW())`,
       [id1, USER, uuid(), id2, uuid(), id3, uuid()]
     );
 
-    // accuracy = COUNT(true) / COUNT(IS NOT NULL) = 1/2 = 50%
+    // satisfaction = 1 positive / 2 with-feedback = 50%
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     expect(history.length).toBeGreaterThanOrEqual(1);
     expect(history[0].value).toBe(50);
   });
 
   it("ignores decisions from other users", async () => {
+    // P3: uses feedback_score, not routing_correct
     const OTHER = uuid();
-    await seedDecision({ userId: OTHER, routingCorrect: true });
-    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: OTHER, feedbackScore: 1 });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     expect(history.length).toBeGreaterThanOrEqual(1);
@@ -496,7 +500,7 @@ describe("getRoutingAccuracyHistory()", () => {
   });
 
   it("respects the days window parameter", async () => {
-    // Insert a row with a created_at far in the past
+    // P3: uses feedback_score; past row needs non-null feedback_score to be counted
     const pastDate = new Date();
     pastDate.setDate(pastDate.getDate() - 60);
     await query(
@@ -507,23 +511,23 @@ describe("getRoutingAccuracyHistory()", () => {
         total_cost_usd, latency_ms, did_fallback, cost_saved_vs_slow, feedback_score, routing_correct, created_at)
        VALUES ($1,$2,$3,'q','simple_qa',2,50,false,false,'v1',0.8,0.3,0.9,
         'gpt-4o-mini','fast','score_above_threshold',100,80,'med',0.8,
-        'gpt-4o-mini',40,20,0.001,120,false,0.002,null,null,$4)`,
+        'gpt-4o-mini',40,20,0.001,120,false,0.002,1,null,$4)`,
       [uuid(), USER, uuid(), pastDate]
     );
-    // Today's record
-    await seedDecision({ userId: USER, routingCorrect: true });
+    // Today's record — positive feedback so it's counted
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history30 = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     const history60 = await DecisionRepo.getRoutingAccuracyHistory(USER, 60);
 
     // 30-day window: only today's record (1 row)
     expect(history30.length).toBeGreaterThanOrEqual(1);
-    // 60-day window: both records (2 rows)
+    // 60-day window: past row (feedback=1) + today's row (feedback=1) = 2 rows
     expect(history60.length).toBeGreaterThanOrEqual(2);
   });
 
   it("returns dates in ISO string format YYYY-MM-DD", async () => {
-    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     history.forEach((h: any) => {
@@ -533,7 +537,7 @@ describe("getRoutingAccuracyHistory()", () => {
 
   it("returns entries ordered by date ASC", async () => {
     // Today's row
-    await seedDecision({ userId: USER, routingCorrect: true });
+    await seedDecision({ userId: USER, feedbackScore: 1 });
 
     const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
     for (let i = 1; i < history.length; i++) {

@@ -15,6 +15,7 @@ export async function analyzeAndLearn(userId: string, latestDecision: DecisionRe
 
   const fastNegativeRate = fastWithFeedback.filter((d: any) => d.feedback_score < 0).length / fastWithFeedback.length;
   const fastPositiveRate = fastWithFeedback.filter((d: any) => d.feedback_score > 0).length / fastWithFeedback.length;
+  const positiveCount = fastWithFeedback.filter((d: any) => d.feedback_score > 0).length;
   const intent = latestDecision.input_features.intent;
 
   const existingMemories = await MemoryRepo.getBehavioralMemories(userId);
@@ -31,7 +32,10 @@ export async function analyzeAndLearn(userId: string, latestDecision: DecisionRe
     return memory;
   }
 
-  if (fastPositiveRate > 0.8 && !existingForIntent) {
+  // P4.1: relaxed positive gate — was fastPositiveRate > 0.8 (required 4+/5+, i.e. 80%+).
+  //   New: require ≥ 3 positive AND positive_rate > 0.5, so 2/3 (66.7%) and 3/4 (75%)
+  //   now trigger positive memory creation instead of silently failing.
+  if (positiveCount >= 3 && fastPositiveRate > 0.5 && !existingForIntent) {
     const memory: BehavioralMemory = {
       id: uuid(), user_id: userId, trigger_pattern: `意图为"${intent}"的问题`,
       observation: `"${intent}"类问题使用快模型时，${Math.round(fastPositiveRate * 100)}%的回答令人满意`,
