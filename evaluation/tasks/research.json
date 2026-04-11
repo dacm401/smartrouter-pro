@@ -1,0 +1,32 @@
+[
+  {
+    "id": "research-analysis-01",
+    "description": "Comparative analysis requiring multi-source research",
+    "prompt": "请对比分析以下三种缓存策略的优缺点：Write-through、Write-back、Write-around。并结合实际应用场景说明各自适合的情况。",
+    "expected_mode": "research"
+  },
+  {
+    "id": "research-investigation-01",
+    "description": "Investigative research question",
+    "prompt": "分布式系统的 CAP 定理在实践中是如何应用的？请举出 3 个具体的开源项目案例，并分析它们是如何在一致性、可用性、分区容忍性之间做权衡的。",
+    "expected_mode": "research"
+  },
+  {
+    "id": "research-comparison-01",
+    "description": "Deep comparison of technologies",
+    "prompt": "我正在设计一个高并发的 Web API，请对比分析 REST、GraphQL 和 gRPC 三种 API 设计风格在性能、可维护性、工具生态方面的差异，并给出选型建议。",
+    "expected_mode": "research"
+  },
+  {
+    "id": "research-survey-01",
+    "description": "Survey/investigation across multiple domains",
+    "prompt": "请调研 2023 年以来大语言模型在代码生成领域的主要进展，包括技术突破、评估基准更新、以及代表性开源/商业项目。",
+    "expected_mode": "research"
+  },
+  {
+    "id": "research-strategy-01",
+    "description": "Strategic planning with multiple factors",
+    "prompt": "我现在负责一个 10 人团队的 AI 产品研发，请从技术选型、团队协作、发布策略、质量保障四个维度，制定一份从零到一的 AI 产品研发计划。",
+    "expected_mode": "research"
+  }
+]

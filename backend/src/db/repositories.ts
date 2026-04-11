@@ -326,11 +326,50 @@ export const TaskRepo = {
     risk: string;
     goal?: string;
     tokens_used?: number;
+    status?: string;
   }): Promise<void> {
     await query(
       `INSERT INTO tasks (id, user_id, session_id, title, mode, complexity, risk, goal, tokens_used, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'completed')`,
-      [data.id, data.user_id, data.session_id, data.title, data.mode, data.complexity, data.risk, data.goal || null, data.tokens_used || 0]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [data.id, data.user_id, data.session_id, data.title, data.mode, data.complexity, data.risk, data.goal || null, data.tokens_used || 0, data.status || "completed"]
+    );
+  },
+
+  /** T1: Find the most recently active (non-terminal) task for a session+user pair. */
+  async findActiveBySession(sessionId: string, userId: string): Promise<Task | null> {
+    const result = await query(
+      `SELECT * FROM tasks
+       WHERE session_id=$1 AND user_id=$2 AND status NOT IN ('completed','failed','cancelled')
+       ORDER BY updated_at DESC LIMIT 1`,
+      [sessionId, userId]
+    );
+    if (result.rows.length === 0) return null;
+    const r: any = result.rows[0];
+    return {
+      task_id: r.id,
+      user_id: r.user_id,
+      session_id: r.session_id,
+      title: r.title || "",
+      mode: r.mode,
+      status: r.status,
+      complexity: r.complexity,
+      risk: r.risk,
+      goal: r.goal || null,
+      budget_profile: typeof r.budget_profile === "object" ? r.budget_profile : {},
+      tokens_used: r.tokens_used || 0,
+      tool_calls_used: r.tool_calls_used || 0,
+      steps_used: r.steps_used || 0,
+      summary_ref: r.summary_ref || null,
+      created_at: new Date(r.created_at).toISOString(),
+      updated_at: new Date(r.updated_at).toISOString(),
+    };
+  },
+
+  /** T1: Set task status directly (used by PATCH /v1/tasks/:id with action) */
+  async setStatus(taskId: string, status: string): Promise<void> {
+    await query(
+      `UPDATE tasks SET status=$2, updated_at=NOW() WHERE id=$1`,
+      [taskId, status]
     );
   },
 

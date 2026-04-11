@@ -74,3 +74,46 @@ taskRouter.get("/:task_id", async (c) => {
     return c.json({ error: error.message }, 500);
   }
 });
+
+// PATCH /v1/tasks/:task_id — control task lifecycle (T1: resume / pause / cancel)
+taskRouter.patch("/:task_id", async (c) => {
+  const taskId = c.req.param("task_id");
+  // C3a: userId from middleware context
+  const userId = (c as unknown as { userId: string }).userId;
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json() as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+
+  const action = body.action as string | undefined;
+  if (!action) return c.json({ error: "body.action is required (resume | pause | cancel)" }, 400);
+
+  const validActions = ["resume", "pause", "cancel"];
+  if (!validActions.includes(action)) {
+    return c.json({ error: `Invalid action '${action}'. Must be one of: ${validActions.join(", ")}` }, 400);
+  }
+
+  // Validate task exists and belongs to user
+  const task = await TaskRepo.getById(taskId);
+  if (!task) return c.json({ error: `Task not found: ${taskId}` }, 404);
+  if (task.user_id !== userId) return c.json({ error: "Forbidden: task does not belong to this user" }, 403);
+
+  // Map action to status
+  const statusMap: Record<string, string> = {
+    resume: "responding",
+    pause: "paused",
+    cancel: "cancelled",
+  };
+  const newStatus = statusMap[action];
+
+  try {
+    await TaskRepo.setStatus(taskId, newStatus);
+    return c.json({ task_id: taskId, action, status: newStatus });
+  } catch (error: any) {
+    console.error("Task PATCH error:", error);
+    return c.json({ error: error.message }, 500);
+  }
+});

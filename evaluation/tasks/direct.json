@@ -1,0 +1,32 @@
+[
+  {
+    "id": "direct-rewrite-01",
+    "description": "Rewrite a paragraph in a different style",
+    "prompt": "请把下面这段话改写成更加正式的商务语言：'我们得赶紧把这件事搞定，不然就来不及了。'",
+    "expected_mode": "direct"
+  },
+  {
+    "id": "direct-summarize-01",
+    "description": "Summarize a short passage",
+    "prompt": "请总结一下这段文字的核心观点：'人工智能的发展经历了三次浪潮。第一次是1950年代的符号主义，第二次是1980年代的专家系统，第三次是2010年代至今的深度学习革命。'",
+    "expected_mode": "direct"
+  },
+  {
+    "id": "direct-concept-01",
+    "description": "Explain a concept concisely",
+    "prompt": "什么是敏捷开发？用三句话解释。",
+    "expected_mode": "direct"
+  },
+  {
+    "id": "direct-code-01",
+    "description": "Write a simple function",
+    "prompt": "用 Python 写一个函数来判断一个数是否为质数。",
+    "expected_mode": "direct"
+  },
+  {
+    "id": "direct-translate-01",
+    "description": "Translate a short sentence",
+    "prompt": "把下面这句话翻译成英文：'我今天很高兴能够参加这次会议。'",
+    "expected_mode": "direct"
+  }
+]

@@ -119,11 +119,15 @@ export interface ChatRequest {
   slow_model?: string;
   /** EL-003: If true, route this request through TaskPlanner + ExecutionLoop (multi-step execution). */
   execute?: boolean;
+  /** T1: Explicit task resumption. If provided, system validates ownership and resumes the task. */
+  task_id?: string;
 }
 
 export interface ChatResponse {
   message: string;
   decision: DecisionRecord;
+  /** T1: The task_id associated with this response. Present when a task was created or resumed. */
+  task_id?: string;
 }
 
 export interface IdentityMemory {

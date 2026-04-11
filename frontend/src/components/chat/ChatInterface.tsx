@@ -8,7 +8,12 @@ import { sendMessage } from "@/lib/api";
 interface Message { id: string; role: "user" | "assistant"; content: string; decision?: any; }
 const USER_ID = "user-001";
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+  /** Callback when the backend returns a task_id (T1: enables workbench panel binding) */
+  onTaskIdChange?: (taskId: string) => void;
+}
+
+export function ChatInterface({ onTaskIdChange }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,6 +34,8 @@ export function ChatInterface() {
       // P4: include decision_id so backend can derive previousDecisionId for implicit feedback
       const history = messages.map((m) => ({ role: m.role, content: m.content, decision_id: m.decision?.id }));
       const data = await sendMessage(text, history, USER_ID, sessionId);
+      // T1: propagate task_id to parent so workbench panels can bind to it
+      if (data.task_id) onTaskIdChange?.(data.task_id);
       const replyContent = data.message || "⚠️ 收到空响应，请检查后端日志。";
       if (data.decision?.execution?.did_fallback) {
         setShowFallbackAnim({ fromModel: data.decision.routing.selected_model, toModel: data.decision.execution.model_used, reason: data.decision.execution.fallback_reason || "质量不达标" });

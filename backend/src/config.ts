@@ -61,6 +61,13 @@ export const config = {
       : ["completed"]),
   },
 
+  // W1: web_search real integration
+  webSearch: {
+    endpoint: process.env.WEB_SEARCH_ENDPOINT || "",
+    apiKey: process.env.WEB_SEARCH_API_KEY || "",
+    maxResults: parseInt(process.env.WEB_SEARCH_MAX_RESULTS || "5"),
+  },
+
   // EL-004: External tool guardrail
   guardrail: {
     // Hosts permitted for http_request tool. Empty = all hosts blocked (fail-safe).

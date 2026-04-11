@@ -313,11 +313,10 @@ export class ToolExecutor {
     }
 
     const queryStr = String(args.query ?? "");
-    const maxResults = Math.min(Number(args.max_results ?? 5), 10);
+    const maxResults = Math.min(Number(args.max_results ?? config.webSearch.maxResults), 10);
 
-    // web_search is stubbed: calls a configured search API endpoint.
-    // If no search endpoint is configured, return a helpful stub response.
-    const searchEndpoint = process.env.WEB_SEARCH_ENDPOINT;
+    // W1: Real search integration — if no endpoint is configured, return explicit error
+    const searchEndpoint = config.webSearch.endpoint;
     if (!searchEndpoint) {
       // E1: write stub evidence (fire-and-forget; taskId is optional)
       if (ctx.taskId) {
@@ -325,15 +324,14 @@ export class ToolExecutor {
           task_id: ctx.taskId,
           user_id: ctx.userId,
           source: "web_search",
-          content: `[web_search stub] No WEB_SEARCH_ENDPOINT configured. Query: "${queryStr}"`,
+          content: `[web_search] No WEB_SEARCH_ENDPOINT configured. Query: "${queryStr}"`,
           source_metadata: { query: queryStr, stub: true },
         }).catch((e) => console.warn("[tool/web_search] Failed to write evidence:", e));
       }
       return {
         query: queryStr,
         results: [],
-        stub: true,
-        message: "web_search: No WEB_SEARCH_ENDPOINT configured. Set the environment variable to enable live search.",
+        error: "WEB_SEARCH_NOT_CONFIGURED",
       };
     }
 
@@ -342,6 +340,15 @@ export class ToolExecutor {
     searchUrl.searchParams.set("q", queryStr);
     searchUrl.searchParams.set("num", String(maxResults));
 
+    const headers: Record<string, string> = {
+      "Accept": "application/json",
+      "User-Agent": "SmartRouter-Pro/1.0",
+    };
+    // W1: attach API key if configured
+    if (config.webSearch.apiKey) {
+      headers["Authorization"] = `Bearer ${config.webSearch.apiKey}`;
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), config.guardrail.httpTimeoutMs);
 
@@ -349,18 +356,29 @@ export class ToolExecutor {
     try {
       response = await fetch(searchUrl.toString(), {
         method: "GET",
-        headers: {
-          "Accept": "application/json",
-          "User-Agent": "SmartRouter-Pro/1.0",
-        },
+        headers,
         signal: controller.signal,
       });
+    } catch (fetchErr: unknown) {
+      // W1: network errors return { results: [], error } instead of throwing
+      clearTimeout(timeoutId);
+      const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+      return {
+        query: queryStr,
+        results: [],
+        error: `FETCH_ERROR: ${message}`,
+      };
     } finally {
       clearTimeout(timeoutId);
     }
 
     if (!response.ok) {
-      throw new Error(`web_search: Search API returned ${response.status} ${response.statusText}`);
+      // W1: non-OK status returns { results: [], error } instead of throwing
+      return {
+        query: queryStr,
+        results: [],
+        error: `SEARCH_API_ERROR: ${response.status} ${response.statusText}`,
+      };
     }
 
     const data = await response.json();

@@ -64,3 +64,55 @@ export async function sendFeedback(decisionId: string, type: string, userId: str
     body: JSON.stringify({ decision_id: decisionId, feedback_type: type, user_id: userId }),
   });
 }
+
+// UI1: Workbench panels API helpers
+
+export async function fetchTasks(userId: string, sessionId?: string) {
+  const { apiBase } = getApiConfig();
+  const url = sessionId
+    ? `${apiBase}/api/tasks/all?session_id=${encodeURIComponent(sessionId)}`
+    : `${apiBase}/api/tasks/all`;
+  const res = await fetch(url, {
+    headers: { "X-User-Id": userId },
+  });
+  if (!res.ok) throw new Error(`加载任务列表失败 (${res.status})`);
+  return res.json();
+}
+
+export async function fetchTaskDetail(taskId: string, userId: string) {
+  const { apiBase } = getApiConfig();
+  const res = await fetch(`${apiBase}/api/tasks/${encodeURIComponent(taskId)}`, {
+    headers: { "X-User-Id": userId },
+  });
+  if (!res.ok) throw new Error(`加载任务详情失败 (${res.status})`);
+  return res.json();
+}
+
+export async function fetchTaskSummary(taskId: string, userId: string) {
+  const { apiBase } = getApiConfig();
+  const res = await fetch(`${apiBase}/api/tasks/${encodeURIComponent(taskId)}/summary`, {
+    headers: { "X-User-Id": userId },
+  });
+  if (!res.ok) throw new Error(`加载任务摘要失败 (${res.status})`);
+  return res.json();
+}
+
+export async function fetchEvidence(taskId: string, userId: string) {
+  const { apiBase } = getApiConfig();
+  const res = await fetch(
+    `${apiBase}/api/evidence?task_id=${encodeURIComponent(taskId)}`,
+    { headers: { "X-User-Id": userId } }
+  );
+  if (!res.ok) throw new Error(`加载证据列表失败 (${res.status})`);
+  return res.json();
+}
+
+export async function fetchTraces(taskId: string, userId: string) {
+  const { apiBase } = getApiConfig();
+  const res = await fetch(
+    `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/traces`,
+    { headers: { "X-User-Id": userId } }
+  );
+  if (!res.ok) throw new Error(`加载执行轨迹失败 (${res.status})`);
+  return res.json();
+}

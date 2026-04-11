@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
-import type { ChatRequest, ChatResponse, DecisionRecord, ExecutionStepsSummary, FeedbackType } from "../types/index.js";
+import type { ChatRequest, ChatResponse, DecisionRecord, ExecutionStepsSummary, FeedbackType, TaskSummary } from "../types/index.js";
 
 const VALID_FEEDBACK_TYPES: readonly FeedbackType[] = [
   "accepted", "regenerated", "edited",
@@ -58,6 +58,38 @@ chatRouter.post("/chat", async (c) => {
 
   const sessionId = body.session_id || uuid();
 
+  // ── T1: Task Resume v1 (方案 C — 混合) ─────────────────────────────────────
+  // Priority 1: explicit task_id in request body
+  // Priority 2: find active task by session_id (no terminal status)
+  // Priority 3: no resumable task → will create new task below
+  let resumedTaskId: string | null = null;
+  let resumedTaskSummary: TaskSummary | null = null;
+
+  if (body.task_id) {
+    const existingTask = await TaskRepo.getById(body.task_id as string);
+    if (!existingTask) {
+      return c.json({ error: `Task not found: ${body.task_id}` }, 404);
+    }
+    if (existingTask.user_id !== userId) {
+      return c.json({ error: "Forbidden: task does not belong to this user" }, 403);
+    }
+    // Only resume if task is not already terminal
+    if (!["completed", "failed", "cancelled"].includes(existingTask.status)) {
+      resumedTaskId = existingTask.task_id;
+      resumedTaskSummary = await TaskRepo.getSummary(existingTask.task_id);
+      // Re-activate task status
+      await TaskRepo.setStatus(resumedTaskId, "responding").catch((e) => console.warn("[chat] Failed to set task status to responding:", e));
+    }
+  } else if (body.session_id) {
+    // T1: implicit resumption — find most recent active task for this session
+    const activeTask = await TaskRepo.findActiveBySession(body.session_id as string, userId);
+    if (activeTask) {
+      resumedTaskId = activeTask.task_id;
+      resumedTaskSummary = await TaskRepo.getSummary(activeTask.task_id);
+      await TaskRepo.setStatus(resumedTaskId, "responding").catch((e) => console.warn("[chat] Failed to set task status to responding:", e));
+    }
+  }
+
   // 请求级覆盖：前端设置里的 Key / 模型优先于环境变量
   const reqApiKey = body.api_key || undefined;
   const effectiveFastModel = body.fast_model || config.fastModel;
@@ -80,20 +112,24 @@ chatRouter.post("/chat", async (c) => {
     // the single-call model path. Existing logic is entirely unchanged when
     // body.execute is absent or false.
     if (body.execute === true) {
-      const taskId = uuid();
+      // T1: reuse resumed taskId if available, otherwise create new
+      const taskId = resumedTaskId || uuid();
       const title = body.message.substring(0, 100);
 
-      // Create task record
-      await TaskRepo.create({
-        id: taskId,
-        user_id: userId,
-        session_id: sessionId,
-        title,
-        mode: "execute",
-        complexity: "medium",
-        risk: "low",
-        goal: title,
-      }).catch((e) => console.error("Failed to create execute task:", e));
+      // Create task record (only if this is a new task, not a resumed one)
+      if (!resumedTaskId) {
+        await TaskRepo.create({
+          id: taskId,
+          user_id: userId,
+          session_id: sessionId,
+          title,
+          mode: "execute",
+          complexity: "medium",
+          risk: "low",
+          goal: title,
+          status: "responding",
+        }).catch((e) => console.error("Failed to create execute task:", e));
+      }
 
       // Memory retrieval for planner context (same pipeline as non-execute path)
       let memoryEntriesUsed: string[] = [];
@@ -198,12 +234,13 @@ chatRouter.post("/chat", async (c) => {
         }).catch((e) => console.error("Failed to persist execution result:", e));
       }
 
-      return c.json({ message: loopResult.finalContent });
+      return c.json({ message: loopResult.finalContent, task_id: taskId });
     }
     // ── End EL-003 execution mode ────────────────────────────────────────────
 
     // 创建任务记录（用 intent 作为 mode 推断：simple_qa/chat → direct，其他 → research）
-    const taskId = uuid();
+    // T1: if we resumed an existing task, reuse its taskId instead of creating a new one
+    const taskId = resumedTaskId || uuid();
     const intentToMode: Record<string, string> = { simple_qa: "direct", chat: "direct", unknown: "direct" };
     const mode = intentToMode[features.intent] || "research";
     const complexityMap = ["low", "low", "medium", "high"];
@@ -261,13 +298,27 @@ chatRouter.post("/chat", async (c) => {
 
     // MR-002: category-aware memory text assembly
     // Replaces flat "[category] content" list with grouped sections by category
-    const taskSummary = retrievalResults.length > 0
-      ? {
-          goal: "User memories:",
-          summaryText: buildCategoryAwareMemoryText(retrievalResults as any).combined,
-          nextStep: null,
-        }
-      : undefined;
+    // T1: Inject resumed task summary into context so the model knows the conversation history
+    let taskSummary: { goal: string; summaryText: string; nextStep: string | null } | undefined;
+    if (resumedTaskSummary) {
+      const s = resumedTaskSummary;
+      const parts: string[] = [];
+      if (s.completed_steps?.length) parts.push(`已完成步骤:\n${s.completed_steps.join("\n")}`);
+      if (s.blocked_by?.length) parts.push(`卡点: ${s.blocked_by.join(", ")}`);
+      if (s.confirmed_facts?.length) parts.push(`已确认事实:\n${s.confirmed_facts.map((f: string) => `• ${f}`).join("\n")}`);
+      if (s.summary_text) parts.push(`任务摘要: ${s.summary_text}`);
+      taskSummary = {
+        goal: s.goal || "继续任务",
+        summaryText: parts.length > 0 ? parts.join("\n\n") : "(无详细摘要)",
+        nextStep: s.next_step ?? null,
+      };
+    } else if (retrievalResults.length > 0) {
+      taskSummary = {
+        goal: "User memories:",
+        summaryText: buildCategoryAwareMemoryText(retrievalResults as any).combined,
+        nextStep: null,
+      };
+    }
 
     const promptAssembly = assemblePrompt({
       mode: mode as PromptMode,
@@ -345,6 +396,7 @@ chatRouter.post("/chat", async (c) => {
     const response: ChatResponse = {
       message: modelResponse.content,
       decision: { ...decision, execution: { ...decision.execution, response_text: "" } },
+      task_id: taskId,
     };
     return c.json(response);
   } catch (error: any) {
