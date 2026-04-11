@@ -4,9 +4,9 @@
 
 ---
 
-## 项目状态：已达到可交付完成态 ✅ → Sprint 15+ 进行中
+## 项目状态：Phase A COMPLETE ✅ → Phase B 待开
 
-Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1 CLOSED，4个 pre-existing TS 错误全部清理。
+Sprint 14 完成态。Sprint 15 全部收口（C3a / E1 / T1 / W1 / UI1 / B1）。TS 错误全部清零。
 
 ---
 
@@ -20,12 +20,25 @@ Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1
 | P4 | Auto-detect Backfill | ✅ CLOSED | `f6371c4` |
 | P5 | Learning-side Signal Level Gating | ✅ CLOSED | `f6371c4` |
 
-**HEAD：** `07d0b16` 含 P1~P5 + C1 + C2 + C3a + E1 + TS cleanup
+---
+
+## Sprint 15 全部 CLOSED ✅
+
+| 卡片 | 描述 | 状态 | Commit |
+|---|---|---|---|
+| C3a | Server Identity Context Adapter | ✅ CLOSED | `5e6d7e8` |
+| E1 | Evidence System v1（Layer 6 入口） | ✅ CLOSED | `07d0b16` |
+| T1 | Task Resume v1 | ✅ CLOSED | `d03704c` |
+| W1 | web_search 真实接入 | ✅ CLOSED | `d03704c` |
+| UI1 | 最小工作台 UI | ✅ CLOSED | `d03704c` |
+| B1 | Benchmark Runner 骨架 | ✅ CLOSED | `d03704c` |
+
+**HEAD：** `d03704c` — Sprint 15 全部收口
 
 | Commit | 内容 |
 |--------|------|
-| `07d0b16` | E1: Evidence System v1 (table, repo, API, executor integration) |
-| `b8...` | ts-type: fix 4 pre-existing TS errors (chat.ts, repositories.ts, execution-loop.ts) |
+| `5fcae59` | ts-type: fix 4 pre-existing TS errors; docs: update HANDOFF for E1 |
+| `d03704c` | feat: Sprint 15 complete — Task Resume v1, web_search, UI panels, Benchmark skeleton |
 
 ---
 
@@ -92,7 +105,51 @@ Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1
 | TS2561 | `repositories.ts:428` | 删除 `routing_accuracy_history` 赋值（类型已移除该字段） | ✅ 清理遗留代码，与 GrowthProfile 类型同步 |
 | TS2339×3 | `execution-loop.ts:302/363/392` | `ExecutionStep` 类型补 `description?: string` | ✅ 纯类型字段，无业务逻辑改动 |
 
-**`tsc --noEmit` 结果：零错误。**
+**`tsc --noEmit` 结果：零错误（backend + frontend + evaluation）。**
+
+---
+
+## T1 核心实现要点（Task Resume v1）
+
+- **触发方式**：方案 C（混合）——显式 `task_id` 优先；无则按 `session_id` 找最近 `status NOT IN ('completed','failed','cancelled')`；都没有就新建
+- `TaskRepo.findActiveBySession(sessionId, userId)`：查最近 active task
+- `TaskRepo.setStatus(taskId, status)`：resume→`responding` / pause→`paused` / cancel→`cancelled`
+- `PATCH /v1/tasks/:task_id`：提供 `action: 'resume' | 'pause' | 'cancel'`，C3a 保护
+- `resumedTaskSummary` 注入 prompt context：`completed_steps / blocked_by / confirmed_facts / summary_text`
+- `ChatRequest.task_id` / `ChatResponse.task_id`：前后端契约
+- `tests/repositories/task-resume.test.ts`：5 个用例（DB 基础设施未执行）
+
+---
+
+## W1 核心实现要点（web_search 真实接入）
+
+- `config.webSearch`：新增 `{ endpoint, apiKey, maxResults }` 配置节
+- `handleWebSearch()`：读 `config.webSearch.endpoint`，无 endpoint → `{ results: [], error: "WEB_SEARCH_NOT_CONFIGURED" }`
+- 带 `Authorization: Bearer <apiKey>` header（若有）
+- 网络错误 / 非 OK 状态 → `{ results: [], error: "FETCH_ERROR: ..." }` / `{ results: [], error: "SEARCH_API_ERROR: ..." }`，不抛异常
+- `.env.example` 补 `WEB_SEARCH_ENDPOINT=` / `WEB_SEARCH_API_KEY=` / `WEB_SEARCH_MAX_RESULTS=`
+
+---
+
+## UI1 核心实现要点（最小工作台 UI）
+
+- **TaskPanel**：`GET /v1/tasks/all`，展示 `title / status / mode`，点击选中
+- **EvidencePanel**：`GET /v1/evidence?task_id=`，source icon + content（截断 200 字）+ URL 链接
+- **TracePanel**：`GET /v1/tasks/:id/traces`，type 分图标，展示 detail 摘要
+- `ChatInterface.onTaskIdChange`：响应带回 `task_id` 后触发回调，驱动面板刷新
+- `app/page.tsx`：右侧工作台侧边栏（默认展开，可折叠），Task Panel 上 + Evidence/Trace tab 切换
+- 未引入新 UI 库，仅用现有 Tailwind / React
+
+---
+
+## B1 核心实现要点（Benchmark Runner 骨架）
+
+- `evaluation/runner.ts`：`BenchmarkTask[]` / `BenchmarkResult[]` 类型，`runBenchmark()` / `printReport()`
+- `evaluation/tasks/direct.json`：5 条 direct 模式测试用例
+- `evaluation/tasks/research.json`：5 条 research 模式测试用例
+- `evaluation/README.md`：运行说明 `npx ts-node evaluation/runner.ts`
+- `evaluation/tsconfig.json`：独立 tsconfig，引用 backend `@types/node`
+- runner 可编译：`tsc --noEmit` 零错误
 
 ---
 
@@ -120,6 +177,8 @@ Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1
 | feedback-collector.test.ts（P4+C2） | `npx vitest run ... feedback-collector.test.ts` | 48 tests ✅ |
 | feedback-event-repo.test.ts（P3） | `npx vitest run ... feedback-event-repo.test.ts` | 21 tests ✅ |
 | decision-repo.test.ts（C1） | `npx vitest run ... decision-repo.test.ts` | 48 tests ✅ |
+| evidence-repo.test.ts（E1） | `npx vitest run --config vitest.repo.config.ts ... evidence-repo.test.ts` | 18 tests ⚠️ DB down |
+| task-resume.test.ts（T1） | `npx vitest run --config vitest.repo.config.ts ... task-resume.test.ts` | 5 tests ⚠️ DB down |
 
 ⚠️ PowerShell 注意：`&&` 链式执行会短路，不作最终证据。以单文件独立进程结果为准。
 
@@ -136,6 +195,12 @@ Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1
 | `backend/tests/features/feedback-collector.test.ts` | P4+C2 验收测试 48 个 |
 | `backend/tests/repositories/feedback-event-repo.test.ts` | Repo 测试 21 个 |
 | `backend/tests/repositories/decision-repo.test.ts` | C1 验收测试 48 个 |
+| `backend/src/api/chat.ts` | T1 Task Resume 核心逻辑 |
+| `backend/src/api/evidence.ts` | E1 Evidence CRUD API |
+| `backend/src/tools/executor.ts` | W1 web_search 真实接入 + E1 evidence fire-and-forget |
+| `frontend/src/app/page.tsx` | UI1 工作台侧边栏集成 |
+| `frontend/src/components/workbench/` | UI1 TaskPanel / EvidencePanel / TracePanel |
+| `evaluation/runner.ts` | B1 Benchmark Runner 骨架 |
 | `docs/sprint14-p1-implicit-signal-audit.md` | P1 审计报告 |
 
 ---
@@ -144,8 +209,8 @@ Sprint 14 交付阻塞项全部清除。Sprint 15 已完成（C3a CLOSED），E1
 
 | 卡片 | 说明 | 风险级别 |
 |---|---|---|
-| C3: Server Identity Context | `user_id` 从客户端传参迁移到服务端身份上下文 | 中 |
 | Feedback dual-write reverse order | `feedback_events` 成功 + `decision_logs` 失败时的表间短暂不一致 | 低 |
+| Evidence System Layer 6 完整性 | evidence 只写了 web_search 来源，http_request 来源待 W1 接入后补充 | 低 |
 
 ---
 
