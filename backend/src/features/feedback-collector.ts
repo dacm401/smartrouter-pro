@@ -12,9 +12,16 @@ export async function recordFeedback(
   rawData?: Record<string, unknown>,
 ): Promise<void> {
   const score = FEEDBACK_SCORES[feedbackType] || 0;
-  await DecisionRepo.updateFeedback(decisionId, feedbackType, score);
+  // C2: feedback_events is the single source of truth for signal_level.
+  // Write it first; only update decision_logs on success.
+  // If feedback_events write fails, decision_logs stays clean — legacy fallback
+  // can never pick up an L2/L3 signal without its corresponding feedback_events record.
   if (userId) {
     await FeedbackEventRepo.save({ decisionId, userId, eventType: feedbackType, rawData });
+    await DecisionRepo.updateFeedback(decisionId, feedbackType, score);
+  } else {
+    // Legacy path: no userId, only write decision_logs (no feedback_events)
+    await DecisionRepo.updateFeedback(decisionId, feedbackType, score);
   }
 }
 

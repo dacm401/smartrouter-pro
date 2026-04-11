@@ -275,3 +275,103 @@ async function countFeedbackEvents(): Promise<number> {
   const result = await query(`SELECT COUNT(*)::int as c FROM feedback_events`);
   return result.rows[0].c;
 }
+
+// C2: recordFeedback write-order atomicity
+// Verifies that feedback_events is written BEFORE decision_logs.
+// This prevents L2/L3 signals from polluting legacy L1 truth when event write fails.
+describe("recordFeedback — write-order atomicity (C2)", () => {
+  // Seed a minimal decision_log row so DecisionRepo.updateFeedback has a target.
+  beforeEach(async () => {
+    const { query } = await import("../../src/db/connection.js");
+    await query(
+      `INSERT INTO decision_logs (id, user_id, session_id, query_preview, intent, complexity_score,
+        input_token_count, has_code, has_math, router_version, fast_score, slow_score, confidence,
+        selected_model, selected_role, selection_reason, context_original_tokens, context_compressed_tokens,
+        compression_level, compression_ratio, model_used, exec_input_tokens, exec_output_tokens,
+        total_cost_usd, latency_ms, did_fallback, cost_saved_vs_slow, feedback_score, routing_correct)
+       VALUES ($1,$2,$3,'test','simple_qa',2,50,false,false,'v1',0.8,0.3,0.9,
+        'gpt-4o-mini','fast','score',100,80,'med',0.8,'gpt-4o-mini',40,20,0.001,120,false,0.002,NULL,null)`,
+      [DECISION, USER, randomUUID()]
+    );
+  });
+
+  it("FeedbackEventRepo.save success → decision_logs.feedback_score is updated", async () => {
+    // No mock needed — real DB, should succeed
+    await recordFeedback(DECISION, "thumbs_up", USER);
+
+    const { query } = await import("../../src/db/connection.js");
+    const result = await query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [DECISION]);
+    expect(result.rows[0].feedback_type).toBe("thumbs_up");
+    expect(Number(result.rows[0].feedback_score)).toBe(2);
+  });
+
+  it("FeedbackEventRepo.save failure → decision_logs.feedback_score remains NULL (atomicity)", async () => {
+    // Mock FeedbackEventRepo.save to throw — simulates DB constraint or network error
+    const { FeedbackEventRepo: OriginalRepo } = await import("../../src/db/repositories.js");
+    const originalSave = OriginalRepo.save;
+    const saveSpy = vi
+      .spyOn(OriginalRepo, "save")
+      .mockRejectedValueOnce(new Error("Simulated DB write failure"));
+
+    // decision_logs row starts with feedback_score=NULL (set in beforeEach)
+    await expect(
+      recordFeedback(DECISION, "thumbs_up", USER)
+    ).rejects.toThrow("Simulated DB write failure");
+
+    // Verify decision_logs was NOT updated
+    const { query } = await import("../../src/db/connection.js");
+    const result = await query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [DECISION]);
+    expect(result.rows[0].feedback_type).toBeNull();
+    expect(result.rows[0].feedback_score).toBeNull();
+
+    // Restore
+    saveSpy.mockRestore();
+  });
+
+  it("L2 signal (follow_up_thanks): FeedbackEventRepo.save failure → no isolated decision_logs update", async () => {
+    const { FeedbackEventRepo: OriginalRepo } = await import("../../src/db/repositories.js");
+    const saveSpy = vi
+      .spyOn(OriginalRepo, "save")
+      .mockRejectedValueOnce(new Error("Simulated failure"));
+
+    // Without C2 fix this would leave decision_logs with feedback_score=-2 for an L2 signal
+    await expect(
+      recordFeedback(DECISION, "follow_up_thanks", USER)
+    ).rejects.toThrow("Simulated failure");
+
+    const { query } = await import("../../src/db/connection.js");
+    const result = await query(`SELECT feedback_score FROM decision_logs WHERE id=$1`, [DECISION]);
+    expect(result.rows[0].feedback_score).toBeNull();
+
+    saveSpy.mockRestore();
+  });
+
+  it("L3 signal (regenerated): FeedbackEventRepo.save failure → no isolated decision_logs update", async () => {
+    const { FeedbackEventRepo: OriginalRepo } = await import("../../src/db/repositories.js");
+    const saveSpy = vi
+      .spyOn(OriginalRepo, "save")
+      .mockRejectedValueOnce(new Error("Simulated failure"));
+
+    await expect(
+      recordFeedback(DECISION, "regenerated", USER)
+    ).rejects.toThrow("Simulated failure");
+
+    const { query } = await import("../../src/db/connection.js");
+    const result = await query(`SELECT feedback_score FROM decision_logs WHERE id=$1`, [DECISION]);
+    expect(result.rows[0].feedback_score).toBeNull();
+
+    saveSpy.mockRestore();
+  });
+
+  it("no userId → only writes decision_logs (legacy path, unchanged)", async () => {
+    await recordFeedback(DECISION, "thumbs_up"); // no userId
+
+    const { query } = await import("../../src/db/connection.js");
+    const result = await query(`SELECT feedback_type, feedback_score FROM decision_logs WHERE id=$1`, [DECISION]);
+    expect(result.rows[0].feedback_type).toBe("thumbs_up");
+    expect(Number(result.rows[0].feedback_score)).toBe(2);
+
+    // feedback_events must remain empty (no userId means no event)
+    expect(await countFeedbackEvents()).toBe(0);
+  });
+});

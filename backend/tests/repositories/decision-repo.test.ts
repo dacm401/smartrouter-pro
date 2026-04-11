@@ -545,3 +545,193 @@ describe("getRoutingAccuracyHistory() — P3: satisfaction rate from feedback_sc
     }
   });
 });
+
+// ── getTodayStats() signal-level filtering (P5: satisfaction_rate aligns with analyzeAndLearn L1 truth) ──
+
+describe("getTodayStats() signal-level filtering", () => {
+  /**
+   * Helper: seed a feedback_events row directly (bypassing recordFeedback).
+   * Used to construct precise L1/L2/L3 signal scenarios.
+   */
+  async function seedFeedbackEvent(opts: {
+    decisionId: string;
+    userId: string;
+    eventType: string;
+    signalLevel: number;
+    source?: "ui" | "auto_detect" | "system";
+  }): Promise<void> {
+    await query(
+      `INSERT INTO feedback_events (id, decision_id, user_id, event_type, signal_level, source, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
+      [uuid(), opts.decisionId, opts.userId, opts.eventType, opts.signalLevel, opts.source ?? "ui"]
+    );
+  }
+
+  it("L1 explicit (signal_level=1) counts toward satisfaction_rate", async () => {
+    const id1 = await seedDecision({ userId: USER, feedbackScore: 2 }); // thumbs_up legacy score
+    const id2 = await seedDecision({ userId: USER, feedbackScore: 2 });
+    // feedback_events L1
+    await seedFeedbackEvent({ decisionId: id1, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+    await seedFeedbackEvent({ decisionId: id2, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    expect(stats.satisfaction_rate).toBe(100); // 2 positive / 2 L1 = 100%
+  });
+
+  it("L2 (signal_level=2) is excluded from satisfaction_rate denominator", async () => {
+    // 2 L2 decisions with positive feedback_score, 1 L1 positive — satisfaction should be 100% (1/1)
+    const idL1 = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL1, userId: USER, eventType: "follow_up_thanks", signalLevel: 2 });
+
+    const idL1pos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL1pos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // Only the L1 decision counts (denominator=1, numerator=1)
+    expect(stats.satisfaction_rate).toBe(100);
+  });
+
+  it("L3 (signal_level=3) is excluded from satisfaction_rate", async () => {
+    const idL3 = await seedDecision({ userId: USER, feedbackScore: -2 });
+    await seedFeedbackEvent({ decisionId: idL3, userId: USER, eventType: "regenerated", signalLevel: 3 });
+
+    const idL1pos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL1pos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // L3 excluded; only L1 positive counts → 1/1 = 100%
+    expect(stats.satisfaction_rate).toBe(100);
+  });
+
+  it("mixed L1 + L2: satisfaction_rate computed on L1 only", async () => {
+    // L1 positive
+    const idPos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idPos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    // L1 negative
+    const idNeg = await seedDecision({ userId: USER, feedbackScore: 0 });
+    await seedFeedbackEvent({ decisionId: idNeg, userId: USER, eventType: "thumbs_down", signalLevel: 1 });
+
+    // L2 — should NOT affect rate
+    const idL2 = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL2, userId: USER, eventType: "follow_up_thanks", signalLevel: 2 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // Denominator = 2 (only L1), numerator = 1 (only thumbs_up) → 50%
+    expect(stats.satisfaction_rate).toBe(50);
+  });
+
+  it("legacy: no feedback_events + feedback_score IS NOT NULL → treated as L1", async () => {
+    // No feedback_events record; seedDecision only sets feedback_score
+    await seedDecision({ userId: USER, feedbackScore: 1 }); // positive legacy
+    await seedDecision({ userId: USER, feedbackScore: 1 }); // positive legacy
+    await seedDecision({ userId: USER, feedbackScore: 0 });  // negative legacy
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // Legacy decisions treated as L1 → 2 positive / 3 total = 67%
+    expect(stats.satisfaction_rate).toBe(67);
+  });
+
+  it("legacy: no feedback_events + feedback_score IS NULL → not counted in satisfaction", async () => {
+    await seedDecision({ userId: USER, feedbackScore: null }); // no signal at all
+    await seedDecision({ userId: USER, feedbackScore: 1 });   // legacy L1 positive
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // Only the legacy L1 positive counts → 1/1 = 100%
+    expect(stats.satisfaction_rate).toBe(100);
+  });
+
+  it("L1 negative (thumbs_down) counts in denominator but not numerator", async () => {
+    const idPos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idPos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const idNeg = await seedDecision({ userId: USER, feedbackScore: 0 });
+    await seedFeedbackEvent({ decisionId: idNeg, userId: USER, eventType: "thumbs_down", signalLevel: 1 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // 1 positive / 2 total L1 = 50%
+    expect(stats.satisfaction_rate).toBe(50);
+  });
+
+  it("other user's feedback_events do not affect satisfaction_rate", async () => {
+    const OTHER = uuid();
+    const idSelf = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idSelf, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    // OTHER's L1 positive — should not affect USER's rate
+    const idOther = await seedDecision({ userId: OTHER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idOther, userId: OTHER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const stats = await DecisionRepo.getTodayStats(USER);
+    // Only USER's L1 positive counts → 1/1 = 100%
+    expect(stats.satisfaction_rate).toBe(100);
+  });
+});
+
+// ── getRoutingAccuracyHistory() signal-level filtering ──
+
+describe("getRoutingAccuracyHistory() signal-level filtering", () => {
+  async function seedFeedbackEvent(opts: {
+    decisionId: string;
+    userId: string;
+    eventType: string;
+    signalLevel: number;
+    source?: "ui" | "auto_detect" | "system";
+  }): Promise<void> {
+    await query(
+      `INSERT INTO feedback_events (id, decision_id, user_id, event_type, signal_level, source, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
+      [uuid(), opts.decisionId, opts.userId, opts.eventType, opts.signalLevel, opts.source ?? "ui"]
+    );
+  }
+
+  it("L1 explicit (signal_level=1) counted in history", async () => {
+    const id1 = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: id1, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0].value).toBe(100); // 1 positive L1 / 1 L1 = 100%
+  });
+
+  it("L2 (signal_level=2) excluded from history value", async () => {
+    const idL2 = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL2, userId: USER, eventType: "follow_up_thanks", signalLevel: 2 });
+
+    const idL1pos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL1pos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    // Only L1 counts → 1 positive / 1 L1 = 100%
+    expect(history[0].value).toBe(100);
+  });
+
+  it("L3 (signal_level=3) excluded from history", async () => {
+    const idL3 = await seedDecision({ userId: USER, feedbackScore: -2 });
+    await seedFeedbackEvent({ decisionId: idL3, userId: USER, eventType: "regenerated", signalLevel: 3 });
+
+    const idL1pos = await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedFeedbackEvent({ decisionId: idL1pos, userId: USER, eventType: "thumbs_up", signalLevel: 1 });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    expect(history[0].value).toBe(100); // L3 excluded, L1 positive only
+  });
+
+  it("legacy: no feedback_events + feedback_score IS NOT NULL → treated as L1 in history", async () => {
+    await seedDecision({ userId: USER, feedbackScore: 2 });
+    await seedDecision({ userId: USER, feedbackScore: 0 });
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    // Legacy treated as L1: 1 positive / 2 = 50%
+    expect(history[0].value).toBe(50);
+  });
+
+  it("legacy: no feedback_events + feedback_score IS NULL → not counted in history", async () => {
+    await seedDecision({ userId: USER, feedbackScore: null }); // no signal
+    await seedDecision({ userId: USER, feedbackScore: 2 });   // legacy L1 positive
+
+    const history = await DecisionRepo.getRoutingAccuracyHistory(USER, 30);
+    // Only legacy L1 positive counted → 1/1 = 100%
+    expect(history[0].value).toBe(100);
+  });
+});
