@@ -368,8 +368,8 @@ chatRouter.post("/chat", async (c) => {
 
     // P4: derive previousDecisionId from the last assistant message in history
     const previousDecisionId: string | undefined = (() => {
-      for (let i = body.history.length - 1; i >= 0; i--) {
-        const msg = body.history[i];
+      for (let i = (body.history?.length ?? 0) - 1; i >= 0; i--) {
+        const msg = body.history![i];
         if (msg.role === "assistant" && msg.decision_id) return msg.decision_id;
       }
       return undefined;

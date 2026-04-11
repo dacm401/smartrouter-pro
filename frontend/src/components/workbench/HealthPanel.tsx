@@ -80,9 +80,9 @@ export function HealthPanel() {
         {health && (
           <>
             {/* Overall status badge */}
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-2 ${badge.bg}`}>
-              <span className={`w-2 h-2 rounded-full ${badge.dot} animate-pulse`} />
-              <span className={`text-sm font-semibold ${badge.text}`}>
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-2 ${badge!.bg}`}>
+              <span className={`w-2 h-2 rounded-full ${badge!.dot} animate-pulse`} />
+              <span className={`text-sm font-semibold ${badge!.text}`}>
                 {health.status === "ok" ? "运行正常" : health.status === "degraded" ? "部分降级" : "异常"}
               </span>
               <span className="ml-auto text-xs text-gray-400">v{health.version}</span>
