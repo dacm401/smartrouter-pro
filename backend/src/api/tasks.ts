@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { TaskRepo } from "../db/repositories.js";
 import { formatTraceSummaries } from "../services/trace-formatter.js";
+import { getContextUserId } from "../middleware/identity.js";
 
 // Mounted at /v1/tasks via index.ts
 export const taskRouter = new Hono();
@@ -8,7 +9,7 @@ export const taskRouter = new Hono();
 // GET /v1/tasks/all — list all tasks (uses /all to avoid /:task_id shadowing the "" route)
 taskRouter.get("/all", async (c) => {
   // C3a: userId from middleware context (trusted source)
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   const sessionId = c.req.query("session_id") || undefined;
   try {
     const tasks = await TaskRepo.list(userId, sessionId);
@@ -79,7 +80,7 @@ taskRouter.get("/:task_id", async (c) => {
 taskRouter.patch("/:task_id", async (c) => {
   const taskId = c.req.param("task_id");
   // C3a: userId from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c);
 
   let body: Record<string, unknown>;
   try {

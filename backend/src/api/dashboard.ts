@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { calculateDashboard } from "../logging/metrics-calculator.js";
 import { GrowthRepo } from "../db/repositories.js";
+import { getContextUserId } from "../middleware/identity.js";
 
 const dashboardRouter = new Hono();
 
@@ -8,7 +9,7 @@ const dashboardRouter = new Hono();
 // The :userId path segment is no longer used for identity.
 dashboardRouter.get("/dashboard/:userId", async (c) => {
   // C3a: read from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   try {
     const data = await calculateDashboard(userId);
     return c.json(data);
@@ -19,8 +20,8 @@ dashboardRouter.get("/dashboard/:userId", async (c) => {
 });
 
 dashboardRouter.get("/growth/:userId", async (c) => {
-  // C3a: read from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  // C3a: read from middleware context (middleware always sets userId for /v1/* routes)
+  const userId = getContextUserId(c)!;
   try {
     const profile = await GrowthRepo.getProfile(userId);
     return c.json(profile);

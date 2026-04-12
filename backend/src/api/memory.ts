@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { MemoryEntryRepo } from "../db/repositories.js";
 import type { MemoryEntryInput, MemoryEntryUpdate } from "../types/index.js";
+import { getContextUserId } from "../middleware/identity.js";
 
 export const memoryRouter = new Hono();
 
@@ -14,7 +15,7 @@ function errorResp(c: any, message: string, status = 400) {
 // POST /v1/memory — create
 memoryRouter.post("/", async (c) => {
   // C3a: userId from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   let body: Record<string, unknown>;
   try {
     body = await c.req.json();
@@ -73,7 +74,7 @@ memoryRouter.post("/", async (c) => {
 // GET /v1/memory — list
 memoryRouter.get("/", async (c) => {
   // C3a: userId from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   const category = c.req.query("category") || undefined;
   const limitRaw = c.req.query("limit");
   let limit = 50;
@@ -101,7 +102,7 @@ memoryRouter
   .get("/:id", async (c) => {
     const id = c.req.param("id");
     // C3a: userId from middleware context
-    const userId = (c as unknown as { userId: string }).userId;
+    const userId = getContextUserId(c)!;
     try {
       const entry = await MemoryEntryRepo.getById(id, userId);
       if (!entry) return errorResp(c, `Memory entry not found: ${id}`, 404);
@@ -114,7 +115,7 @@ memoryRouter
   .put("/:id", async (c) => {
     const id = c.req.param("id");
     // C3a: userId from middleware context
-    const userId = (c as unknown as { userId: string }).userId;
+    const userId = getContextUserId(c)!;
     let body: Record<string, unknown>;
     try {
       body = await c.req.json();
@@ -172,7 +173,7 @@ memoryRouter
   .delete("/:id", async (c) => {
     const id = c.req.param("id");
     // C3a: userId from middleware context
-    const userId = (c as unknown as { userId: string }).userId;
+    const userId = getContextUserId(c)!;
     try {
       const deleted = await MemoryEntryRepo.delete(id, userId);
       if (!deleted) return errorResp(c, `Memory entry not found: ${id}`, 404);

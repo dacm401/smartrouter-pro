@@ -24,17 +24,16 @@ export type UserIdContext = { userId: string | undefined };
 
 /**
  * Reads userId from the request context that was set by identityMiddleware.
- * Returns the trusted userId string, or throws if not set.
+ * Returns the trusted userId string, or undefined if not set.
  *
  * Usage in handlers:
  *   const userId = getContextUserId(c);
+ *   // Handle undefined case if the endpoint doesn't require mandatory auth.
  */
-export function getContextUserId(c: Context): string {
-  const userId = (c as unknown as UserIdContext).userId;
-  if (!userId) {
-    throw new Error("IdentityContextMissing: userId not found in request context. Is the identity middleware mounted?");
-  }
-  return userId;
+export function getContextUserId(c: Context): string | undefined {
+  // Hono stores context vars in a private Map via c.set/c.get
+  // c.get("userId") reads from that Map; direct property access (c as any).userId does NOT work
+  return c.get("userId") as string | undefined;
 }
 
 /**

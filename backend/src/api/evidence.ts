@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { EvidenceRepo } from "../db/repositories.js";
 import type { EvidenceInput } from "../types/index.js";
+import { getContextUserId } from "../middleware/identity.js";
 
 export const evidenceRouter = new Hono();
 
@@ -13,7 +14,7 @@ function errorResp(c: any, message: string, status = 400) {
 // POST /v1/evidence — create evidence record
 evidenceRouter.post("/", async (c) => {
   // C3a: userId from middleware context
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   let body: Record<string, unknown>;
   try {
     body = await c.req.json();
@@ -87,7 +88,7 @@ evidenceRouter.get("/", async (c) => {
     }
   }
   // If no filter, require userId context (middleware always provides it)
-  const userId = (c as unknown as { userId: string }).userId;
+  const userId = getContextUserId(c)!;
   const limitRaw = c.req.query("limit");
   let limit = 100;
   if (limitRaw !== undefined) {

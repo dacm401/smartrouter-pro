@@ -49,12 +49,10 @@ chatRouter.post("/chat", async (c) => {
 
   // C3a: Priority 1 — middleware context (trusted X-User-Id header)
   // C3a: Priority 2 — dev-only body shim (only when allowDevFallback=true and no context)
-  let userId = (c as unknown as { userId: string | undefined }).userId;
-  if (!userId && config.identity.allowDevFallback && body.user_id) {
-    userId = body.user_id;
-  }
-  // Final fallback: production should never reach here if middleware is correctly mounted
-  userId = userId || body.user_id || "default-user";
+  // C3a: read from middleware context via c.get() (not direct property — Hono uses private Map)
+  const middlewareUserId = getContextUserId(c);
+  // Dev fallback: if middleware couldn't extract (shouldn't happen with correct header)
+  const userId = middlewareUserId || body.user_id || "default-user";
 
   const sessionId = body.session_id || uuid();
 
@@ -424,13 +422,7 @@ chatRouter.post("/feedback", async (c) => {
 
   // C3a: Priority 1 — middleware context (trusted X-User-Id header)
   // C3a: Priority 2 — dev-only body shim (only when allowDevFallback=true)
-  let user_id = (c as unknown as { userId: string | undefined }).userId;
-  if (!user_id && config.identity.allowDevFallback) {
-    user_id = body.user_id as string;
-  }
-  if (!user_id) {
-    return c.json({ error: "user_id is required (provide X-User-Id header)" }, 400);
-  }
+  let user_id = getContextUserId(c);
 
   // P2-1: Runtime type whitelist validation
   if (!VALID_FEEDBACK_TYPES.includes(feedback_type as FeedbackType)) {

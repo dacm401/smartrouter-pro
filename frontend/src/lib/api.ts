@@ -66,12 +66,13 @@ export async function sendFeedback(decisionId: string, type: string, userId: str
 }
 
 // UI1: Workbench panels API helpers
+// NOTE: tasks and evidence live under /v1/* (backend index.ts app.route("/v1/tasks/...", taskRouter))
 
 export async function fetchTasks(userId: string, sessionId?: string) {
   const { apiBase } = getApiConfig();
   const url = sessionId
-    ? `${apiBase}/api/tasks/all?session_id=${encodeURIComponent(sessionId)}`
-    : `${apiBase}/api/tasks/all`;
+    ? `${apiBase}/v1/tasks/all?session_id=${encodeURIComponent(sessionId)}`
+    : `${apiBase}/v1/tasks/all`;
   const res = await fetch(url, {
     headers: { "X-User-Id": userId },
   });
@@ -81,7 +82,7 @@ export async function fetchTasks(userId: string, sessionId?: string) {
 
 export async function fetchTaskDetail(taskId: string, userId: string) {
   const { apiBase } = getApiConfig();
-  const res = await fetch(`${apiBase}/api/tasks/${encodeURIComponent(taskId)}`, {
+  const res = await fetch(`${apiBase}/v1/tasks/${encodeURIComponent(taskId)}`, {
     headers: { "X-User-Id": userId },
   });
   if (!res.ok) throw new Error(`加载任务详情失败 (${res.status})`);
@@ -90,7 +91,7 @@ export async function fetchTaskDetail(taskId: string, userId: string) {
 
 export async function fetchTaskSummary(taskId: string, userId: string) {
   const { apiBase } = getApiConfig();
-  const res = await fetch(`${apiBase}/api/tasks/${encodeURIComponent(taskId)}/summary`, {
+  const res = await fetch(`${apiBase}/v1/tasks/${encodeURIComponent(taskId)}/summary`, {
     headers: { "X-User-Id": userId },
   });
   if (!res.ok) throw new Error(`加载任务摘要失败 (${res.status})`);
@@ -100,7 +101,7 @@ export async function fetchTaskSummary(taskId: string, userId: string) {
 export async function fetchEvidence(taskId: string, userId: string) {
   const { apiBase } = getApiConfig();
   const res = await fetch(
-    `${apiBase}/api/evidence?task_id=${encodeURIComponent(taskId)}`,
+    `${apiBase}/v1/evidence?task_id=${encodeURIComponent(taskId)}`,
     { headers: { "X-User-Id": userId } }
   );
   if (!res.ok) throw new Error(`加载证据列表失败 (${res.status})`);
@@ -110,7 +111,7 @@ export async function fetchEvidence(taskId: string, userId: string) {
 export async function fetchTraces(taskId: string, userId: string) {
   const { apiBase } = getApiConfig();
   const res = await fetch(
-    `${apiBase}/api/tasks/${encodeURIComponent(taskId)}/traces`,
+    `${apiBase}/v1/tasks/${encodeURIComponent(taskId)}/traces`,
     { headers: { "X-User-Id": userId } }
   );
   if (!res.ok) throw new Error(`加载执行轨迹失败 (${res.status})`);
