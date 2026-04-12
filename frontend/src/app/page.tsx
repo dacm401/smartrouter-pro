@@ -11,6 +11,7 @@ import { Header } from "@/components/layout/Header";
 import { Sidebar } from "@/components/layout/Sidebar";
 import MemoryView from "@/components/views/MemoryView";
 import DashboardView from "@/components/views/DashboardView";
+import TasksView from "@/components/views/TasksView";
 
 type NavView = "chat" | "tasks" | "memory" | "dashboard";
 
@@ -64,20 +65,7 @@ export default function HomePage() {
           )}
 
           {activeNav === "tasks" && (
-            <div className="h-full flex flex-col items-center justify-center" style={{ backgroundColor: "var(--bg-base)" }}>
-              <div className="text-center">
-                <div className="text-4xl mb-4">📋</div>
-                <div className="text-base font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
-                  任务管理
-                </div>
-                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  在右侧面板查看活跃任务列表
-                </div>
-                <div className="text-xs mt-3 px-4 py-2 rounded-lg inline-block" style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text-secondary)" }}>
-                  发送消息 → 自动创建任务 → 右侧查看详情
-                </div>
-              </div>
-            </div>
+            <TasksView userId={userId} />
           )}
 
           {activeNav === "memory" && (

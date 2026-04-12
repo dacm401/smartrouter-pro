@@ -181,3 +181,13 @@ export async function fetchDecision(taskId: string, userId: string) {
   if (!res.ok) throw new Error(`加载决策数据失败 (${res.status})`);
   return res.json();
 }
+
+export async function patchTask(taskId: string, userId: string, action: "resume" | "pause" | "cancel"): Promise<boolean> {
+  const { apiBase } = getApiConfig();
+  const res = await fetch(`${apiBase}/v1/tasks/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", "X-User-Id": userId },
+    body: JSON.stringify({ action }),
+  });
+  return res.ok;
+}
