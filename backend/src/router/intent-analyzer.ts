@@ -1,95 +1,174 @@
 import type { IntentType } from "../types/index.js";
+import { config } from "../config.js";
 
-// 匹配顺序：从具体到宽泛，避免被过早匹配
+// ── 原有正则规则保留，作为降级方案 ─────────────────────────────────────────────
+
 const INTENT_PATTERNS: { intent: IntentType; patterns: RegExp[] }[] = [
-  // 1. math - 纯数学计算（最高优先级，避免 "1+1等于几" 被 simple_qa 抢）
+  // 1. MATH — 数学符号/公式，高置信度
   { intent: "math", patterns: [
-    /^\s*\d+\s*[\+\-\*\/\^]\s*\d+\s*[=等于几]+\s*[?？]?\s*$/i,  // 纯算术
-    /计算|求解|方程|积分|微分|概率|统计|矩阵|几何|证明|数学|公式|定理|推导|化简|求值/i,
-    /解方程|求根|最大值|最小值|极限|导数|偏导|泰勒展开|傅里叶变换/i,
-    /[∫∑∏√∂∇∞±×÷]/,
-    /黎曼猜想|费马大定理|哥德巴赫猜想|庞加莱猜想|NP完全|P vs NP/i,
+    /计算|求解|方程|积分|微分|概率|统计|矩阵|向量|几何|证明/i,
+    /\d+\s*[\+\-\*\/\^]\s*\d+|=\s*\?|求\s*x/i,
+    /[∫∑∏√∂∇]|equation|integral|matrix|derivative/i,
   ]},
 
-  // 2. code - 代码相关
+  // 2. CODE — 必须有代码操作动词，不能只有语言名
   { intent: "code", patterns: [
-    /```[\s\S]*```/,  // 代码块
-    /function\s*\(|def\s+\w+\s*\(|class\s+\w+|import\s+\w+|console\.|print\(/i,
-    /写代码|编程|代码|bug|debug|编译|算法|python|javascript|typescript|java|golang|rust|c\+\+|csharp/i,
-    /实现.*算法|写.*程序|写.*函数|写.*类|写.*脚本|代码.*优化|重构.*代码/i,
-    /quicksort|bubble sort|binary search|dfs|bfs|dp|dynamic programming|递归|迭代/i,
+    /写[一个]*代码|编写代码|实现[一个]*(函数|算法|类|接口)|写[一个]*(函数|脚本|程序|组件)/i,
+    /debug|调试|报错|bug|fix.*代码|代码.*错误|编译错误|运行错误/i,
+    /```[\s\S]|def \w+\(|function \w+\(|class \w+[:{]/,
+    /import \w+|from \w+ import|require\(|npm install|pip install/i,
+    /(python|javascript|typescript|java|rust|golang|c\+\+|swift).{0,15}(写|实现|编写|代码|函数|脚本|程序)/i,
+    /(write|implement|build|create).{0,15}(function|class|script|program|api|component|module)/i,
+    /数据结构|时间复杂度|空间复杂度|递归|迭代|排序算法|搜索算法|动态规划/i,
   ]},
 
-  // 3. research - 研究/调研类（放在 reasoning 之前，避免被吞）
-  { intent: "research", patterns: [
-    /调研|研究|市场.*分析|竞争.*分析|趋势.*分析|行业.*报告|市场.*报告|综述|现状|发展.*趋势|格局|行业|领域|调查/i,
-    /research|market research|competitive analysis|landscape|industry analysis|market share/i,
-    /2024|2025|2026|最新|当前|目前.*情况|近年来|发展趋势|未来.*年|预测/i,
-    /英伟达|nvidia|amd|英特尔|intel|特斯拉|苹果|谷歌|微软|亚马逊|阿里|腾讯|字节|meta/i,
-    /市场份额|市场占有率|竞品|竞争对手|市场格局|产业.*分析/i,
-  ]},
-
-  // 4. reasoning - 深度分析/推理
-  { intent: "reasoning", patterns: [
-    /分析.*原因|比较.*区别|对比.*差异|评估.*优劣|权衡.*利弊|深入.*分析|本质.*区别/i,
-    /analyze|compare|contrast|evaluate|why |how does|difference between|pros and cons/i,
-    /有什么(区别|不同|优势|劣势|联系|关系)|哪个更好|怎么选|如何判断|影响因素/i,
-    /versus|vs\.|better than|compared to|on the other hand|in contrast|trade-off|tradeoff/i,
-    /意义|价值|影响|结果|后果|推导|结论|论证过程|逻辑|因果关系/i,
-  ]},
-
-  // 5. creative - 创作类
-  { intent: "creative", patterns: [
-    /写文章|写故事|诗歌|小说|创作|编写|起草|文案|标题|slogan|营销|广告|剧本|情书|演讲稿/i,
-    /帮我写|给我写|写一首|写一段|写一篇|写个.*故事|编个.*故事|创作.*作品/i,
-    /write.*story|write.*poem|write.*essay|creative writing|brainstorm ideas/i,
-  ]},
-
-  // 6. translation - 翻译
+  // 3. TRANSLATION — 明确翻译动词
   { intent: "translation", patterns: [
-    /翻译|translate|英译中|中译英|译成|译成中文|译成英文|翻成/i,
-    /translate.*to|translation of|in chinese|in english/i,
+    /翻译|translate|英译中|中译英|用[中英日韩法德]文(说|写|表达)/i,
+    /^(translate|翻译).{0,100}$/i,
   ]},
 
-  // 7. summarization - 总结
+  // 4. SUMMARIZATION — 明确总结动词
   { intent: "summarization", patterns: [
-    /总结|概括|摘要|归纳|提炼|summarize|summary|tl;dr|太长不看|简要|概述/i,
-    /总结.*要点|概括.*内容|提取.*关键|归纳.*主要/i,
+    /总结|概括|摘要|归纳|提炼|要点|summarize|summary|tl;?dr/i,
   ]},
 
-  // 8. simple_qa - 简单问答（放在 chat 之前，但要避免太宽泛）
+  // 5. RESEARCH — 市场/行业研究，放在 reasoning 之前
+  { intent: "research", patterns: [
+    /调研|综述|市场分析|竞争分析|行业分析|竞争格局|发展趋势|市场格局/i,
+    /research report|market analysis|competitive landscape|industry overview/i,
+    /(2024|2025|近年|最近几年|当前|目前).{0,20}(市场|行业|竞争|格局|趋势)/i,
+    /全球.{0,15}(市场|行业|竞争)|市场.{0,15}(份额|规模|竞争)/i,
+    /分析.{0,20}(市场|行业|竞争|格局|趋势|现状)/i,
+  ]},
+
+  // 6. REASONING — 分析推理（宽泛，放 research 之后）
+  { intent: "reasoning", patterns: [
+    /为什么|原因是|如何理解|深入分析|本质上|从.*角度|利弊|优缺点/i,
+    /比较.{0,20}(区别|差异|优劣)|有什么(区别|不同|优势|劣势)/i,
+    /why |how does|what causes|explain|analyze|evaluate|compare/i,
+    /pros and cons|trade.?off|versus|vs\.|better than/i,
+  ]},
+
+  // 7. CREATIVE — 创作类（注意：排除「写代码」）
+  { intent: "creative", patterns: [
+    /写[一首|一篇|一段|一个]*(诗|歌词|故事|小说|散文|文章|剧本|对联)/i,
+    /创作[一首|一篇|一段]|编写[一首|一篇]/i,
+    /文案|广告语|slogan|标语|标题|起名|命名/i,
+    /write a (poem|story|essay|song|script|novel)/i,
+    /compose|creative writing|brainstorm/i,
+  ]},
+
+  // 8. SIMPLE_QA — 定义/事实查询（放 creative 之后）
   { intent: "simple_qa", patterns: [
-    // 明确的定义类问题
-    /是什么|是谁|在哪|多少|什么时候|怎么样|哪个|哪里|几个|几点|多久|多贵|多重|多高|多大/i,
-    /what is|who is|where is|when|how much|how many|which|what's|who's|where's|how old|how long/i,
-    /的定义|的含义|是指|指的是|什么叫|什么是|意思是/i,
-    // 80字符以内的纯问题（排除数学计算）
-    /^[^\d\+\-\*\/]{0,80}[?？]\s*$/,
+    // 定义类："X是什么" — 排除含代码操作词的情况
+    /^(?!.*(写|实现|编写|debug|代码)).{0,50}(是什么|是谁|指的是|的定义|什么叫).{0,20}[？?]?\s*$/i,
+    // 简单事实
+    /^.{0,40}(在哪里?|多少钱?|几个|几点|多久|哪个更|哪里有)[？?]?\s*$/i,
+    // 是非题
+    /^.{0,50}(是吗|对吗|是不是|有没有|能不能|可以吗|是否)[？?]?\s*$/i,
+    // 英文定义类
+    /^(what is|who is|what's|who's|define|is it|can i|does it).{0,50}[?]?\s*$/i,
   ]},
 
-  // 9. chat - 闲聊（扩大覆盖）
+  // 9. CHAT — 闲聊（最后兜底，不要太贪婪）
   { intent: "chat", patterns: [
-    /^(你好|hi|hello|hey|嗨|早上好|晚上好|谢谢|感谢|再见|拜拜|ok|好的|明白|嗯|哦|哈)/i,
-    /今天.*天气|天气.*怎么样|心情|最近|怎么了|有什么|聊聊|随便|无聊|好久不见|最近好吗/i,
-    /how are you|what's up|good morning|good night|thanks|thank you|nice to meet/i,
-    /在吗|在不在|忙吗|有空吗|打扰一下|不好意思|请问一下/i,
-    /哈哈|嘿嘿|呵呵|嘻嘻|笑死|绝了|厉害|不错|可以|行|好|嗯嗯|哦哦/i,
+    /^(你好|hi|hello|hey|嗨|早上好|晚上好|谢谢|感谢|再见|拜拜|哈哈|哦|啊|嗯|好的|明白|ok)/i,
+    /今天天气|最近怎么样|你最近|有什么好玩|随便聊|陪我聊|无聊了|聊聊天/i,
+    /how are you|what's up|good morning|good night|thank you|thanks|bye/i,
   ]},
 ];
 
 export function analyzeIntent(query: string): IntentType {
+  const trimmed = query.trim();
   for (const { intent, patterns } of INTENT_PATTERNS) {
     for (const pattern of patterns) {
-      if (pattern.test(query)) return intent;
+      if (pattern.test(trimmed)) return intent;
     }
   }
   return "unknown";
 }
 
 export function hasCode(query: string): boolean {
-  return /```|function\s*\(|def\s+\w+\s*\(|class\s+\w+|import\s+\w+|const\s+\w+\s*=|let\s+\w+\s*=|var\s+\w+\s*=|print\(|console\./.test(query);
+  return /```|function |def |class |import |const |let |var |print\(|console\./.test(query);
 }
 
 export function hasMath(query: string): boolean {
-  return /[∫∑∏√∂∇∞±×÷]|\d+\s*[\+\-\*\/\^]\s*\d+|方程|积分|矩阵|求导|极限|概率|统计/.test(query);
+  return /[∫∑∏√∂∇]|\d+\s*[\+\-\*\/\^]\s*\d+|方程|积分|矩阵|equation|integral|matrix/.test(query);
+}
+
+// ── 新增：LLM-based Intent Classifier ─────────────────────────────────────────
+
+const INTENT_CLASSIFIER_PROMPT = `你是一个意图分类器。根据用户消息，输出最匹配的意图类型。
+
+只能输出以下9个词之一，不要输出任何其他内容：
+chat
+simple_qa
+translation
+summarization
+code
+math
+reasoning
+creative
+research
+
+判断规则：
+- chat：打招呼、闲聊、情绪表达、简短回应（"嗯""好的""继续"）
+- simple_qa：问一个具体事实或定义，答案简短（"Python是什么""北京在哪"）
+- translation：要求翻译内容
+- summarization：要求总结/概括某段内容
+- code：要求写代码、调试、实现算法
+- math：数学计算、公式推导
+- reasoning：需要分析、比较、推理、解释原因
+- creative：写作、创作、文案、起名
+- research：市场调研、行业分析、综述类问题`;
+
+export async function analyzeIntentWithLLM(
+  query: string,
+  apiKey: string,
+  baseUrl: string,
+  model: string
+): Promise<IntentType> {
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: INTENT_CLASSIFIER_PROMPT },
+          { role: "user", content: query },
+        ],
+        max_tokens: 10,
+        temperature: 0,
+      }),
+    });
+
+    if (!response.ok) {
+      // API 调用失败，降级到正则
+      return analyzeIntent(query);
+    }
+
+    const data = await response.json() as {
+      choices?: { message?: { content?: string } }[];
+    };
+    const result = data.choices?.[0]?.message?.content?.trim().toLowerCase() ?? "";
+    
+    const validIntents: IntentType[] = [
+      "chat", "simple_qa", "translation", "summarization",
+      "code", "math", "reasoning", "creative", "research",
+    ];
+
+    if (validIntents.includes(result as IntentType)) {
+      return result as IntentType;
+    }
+    // LLM 输出不在合法范围内，降级到正则
+    return analyzeIntent(query);
+  } catch {
+    // 任何错误都降级到正则
+    return analyzeIntent(query);
+  }
 }

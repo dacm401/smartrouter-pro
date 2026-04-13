@@ -1,14 +1,28 @@
 import type { ChatRequest, InputFeatures, RoutingDecision } from "../types/index.js";
-import { analyzeIntent, hasCode, hasMath } from "./intent-analyzer.js";
+import { analyzeIntent, analyzeIntentWithLLM, hasCode, hasMath } from "./intent-analyzer.js";
 import { scoreComplexity } from "./complexity-scorer.js";
 import { ruleRoute } from "./rule-router.js";
 import { MemoryRepo } from "../db/repositories.js";
 import { countTokens } from "../models/token-counter.js";
+import { config } from "../config.js";
 
 export async function analyzeAndRoute(request: ChatRequest): Promise<{ features: InputFeatures; routing: RoutingDecision }> {
   const { message, history = [], user_id } = request;
 
-  const intent = analyzeIntent(message);
+  // SP28-A: 优先使用 LLM-based intent classifier，失败时降级到正则
+  let intent: ReturnType<typeof analyzeIntent> = "unknown";
+  try {
+    intent = await analyzeIntentWithLLM(
+      message,
+      config.openaiApiKey,
+      config.openaiBaseUrl || "https://api.openai.com/v1",
+      config.fastModel
+    );
+  } catch {
+    // LLM 失败，降级到正则
+    intent = analyzeIntent(message);
+  }
+
   const tokenCount = countTokens(message);
   const contextTokens = history.reduce((sum, m) => sum + countTokens(m.content), 0);
   const { score: complexityScore } = scoreComplexity(message, intent, history ?? []);

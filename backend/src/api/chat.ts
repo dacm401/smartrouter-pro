@@ -278,9 +278,13 @@ chatRouter.post("/chat", async (c) => {
       const { assemblePrompt } = await import("../services/prompt-assembler.js");
       const promptAssembly = assemblePrompt({
         mode: mode as any,
+        modelMode: routing.selected_role as "fast" | "slow",
+        intent: features.intent,
         userMessage: message,
+        memoryText: retrievalResults.length > 0 ? buildCategoryAwareMemoryText(retrievalResults as any).combined : undefined,
         taskSummary,
         maxTaskSummaryTokens: config.memory.maxEntriesToInject * config.memory.maxTokensPerEntry,
+        lang: features.language as "zh" | "en",
       });
 
       const contextResult = await manageContext(
@@ -439,9 +443,13 @@ chatRouter.post("/chat", async (c) => {
 
     const promptAssembly = assemblePrompt({
       mode: mode as PromptMode,
+      modelMode: routing.selected_role as "fast" | "slow",
+      intent: features.intent,
       userMessage: message,
+      memoryText: retrievalResults.length > 0 ? buildCategoryAwareMemoryText(retrievalResults as any).combined : undefined,
       taskSummary,
       maxTaskSummaryTokens: config.memory.maxEntriesToInject * config.memory.maxTokensPerEntry,
+      lang: features.language as "zh" | "en",
     });
 
     const contextResult = await manageContext(
