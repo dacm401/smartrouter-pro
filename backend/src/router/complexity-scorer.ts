@@ -40,6 +40,21 @@ export function scoreComplexity(query: string, intent: IntentType, history: Chat
   const structuredTerms = query.match(/按.*格式|表格|分点|详细|完整|逐步|示例|注意事项|不少于|至少|保留.*术语|保持.*风格/gi);
   if (structuredTerms) specificity_score += Math.min(10, structuredTerms.length * 3);
 
+  // 新增：翻译关键词兜底（防止 LLM classifier 误判为 chat）
+  if (/翻译|translate|英译中|中译英|译成|翻译成/i.test(query)) {
+    multi_step_score += 8;
+  }
+
+  // 新增：代码关键词兜底（防止 LLM classifier 误判为 chat）
+  if (/(python|javascript|typescript|java|rust|golang|c\+\+|php|ruby|go|sql).{0,20}(代码|程序|脚本|函数)/i.test(query)) {
+    specificity_score += 10;
+  }
+
+  // 新增：算法/数据结构关键词（快排/归并/DP等天然是 complex task）
+  if (/快排|快速排序|归并排序|堆排序|希尔排序|冒泡排序|排序算法|搜索算法|二分查找|动态规划|递归|迭代|时间复杂度|空间复杂度/i.test(query)) {
+    specificity_score += 12;
+  }
+
   // 新增：长文本额外加分
   if (safeQuery.length > 120) specificity_score += 5;
   if (safeQuery.length > 300) specificity_score += 5;

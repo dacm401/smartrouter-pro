@@ -1,0 +1,182 @@
+[
+  {
+    "input": "用Python写一个冒泡排序",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是量子纠缠",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一个快速排序的Python实现，要求包含递归和迭代两种版本",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是区块链，以及它如何保证数据不可篡改",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "帮我写一封正式的商务邮件，请求延期提交项目报告",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "用JavaScript实现一个防抖函数(debounce)",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释TCP和UDP的区别，以及各自适用的场景",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一首七言绝句，主题是秋天",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一个SQL查询，找出每个部门工资最高的员工",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是RESTful API设计原则",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "帮我写一段产品描述，介绍一款智能手表",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "用Python实现一个简单的HTTP服务器",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 3,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是机器学习中的过拟合，以及如何防止",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一段自我介绍，用于求职面试",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一个正则表达式，匹配有效的邮箱地址",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是Docker容器，它和虚拟机有什么区别",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "帮我写一个短故事，主题是友谊",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "用Java实现一个单例模式，要求线程安全",
+    "answer": "",
+    "category": "code",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "解释什么是Git的工作流程，包括add/commit/push",
+    "answer": "",
+    "category": "explanation",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  },
+  {
+    "input": "写一段社交媒体文案，推广一款新上市的咖啡",
+    "answer": "",
+    "category": "creative",
+    "keyword_hits": 0,
+    "keyword_total": 4,
+    "length_ok": false,
+    "rule_score": 0
+  }
+]

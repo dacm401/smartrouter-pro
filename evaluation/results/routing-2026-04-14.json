@@ -7,7 +7,7 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 2841
+    "latency_ms": 1694
   },
   {
     "input": "你好",
@@ -17,7 +17,7 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1190
+    "latency_ms": 1002
   },
   {
     "input": "谢谢",
@@ -27,7 +27,7 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 618
+    "latency_ms": 521
   },
   {
     "input": "再见",
@@ -37,7 +37,7 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1628
+    "latency_ms": 1205
   },
   {
     "input": "How are you today?",
@@ -47,17 +47,17 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 741
+    "latency_ms": 1148
   },
   {
     "input": "1+1等于几",
     "expected_mode": "fast",
-    "actual_mode": "slow",
+    "actual_mode": "fast",
     "expected_intent": "simple_qa",
     "actual_intent": "math",
-    "mode_correct": false,
+    "mode_correct": true,
     "intent_correct": false,
-    "latency_ms": 64695
+    "latency_ms": 822
   },
   {
     "input": "北京是中国的首都吗",
@@ -67,7 +67,7 @@
     "actual_intent": "simple_qa",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 2089
+    "latency_ms": 682
   },
   {
     "input": "Python是什么",
@@ -77,7 +77,7 @@
     "actual_intent": "simple_qa",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 763
+    "latency_ms": 932
   },
   {
     "input": "What's the capital of France?",
@@ -87,7 +87,7 @@
     "actual_intent": "simple_qa",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 731
+    "latency_ms": 858
   },
   {
     "input": "现在几点了",
@@ -97,7 +97,7 @@
     "actual_intent": "chat",
     "mode_correct": true,
     "intent_correct": false,
-    "latency_ms": 975
+    "latency_ms": 1049
   },
   {
     "input": "把'hello world'翻译成中文",
@@ -107,7 +107,7 @@
     "actual_intent": "translation",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 977
+    "latency_ms": 477
   },
   {
     "input": "Translate 'good morning' to Chinese",
@@ -117,7 +117,7 @@
     "actual_intent": "translation",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 356
+    "latency_ms": 788
   },
   {
     "input": "用日语说谢谢",
@@ -127,7 +127,7 @@
     "actual_intent": "translation",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 362
+    "latency_ms": 547
   },
   {
     "input": "翻译这段技术文档，保留所有专业术语的准确性，并解释每个术语的含义",
@@ -137,7 +137,7 @@
     "actual_intent": "translation",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 569
+    "latency_ms": 1141
   },
   {
     "input": "将这篇学术论文从英文翻译成中文，保持学术写作风格",
@@ -147,7 +147,7 @@
     "actual_intent": "translation",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 975
+    "latency_ms": 1277
   },
   {
     "input": "总结这段话的意思",
@@ -157,7 +157,7 @@
     "actual_intent": "summarization",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1007
+    "latency_ms": 798
   },
   {
     "input": "概括一下这段文字的主要内容",
@@ -167,7 +167,7 @@
     "actual_intent": "summarization",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1128
+    "latency_ms": 983
   },
   {
     "input": "请对这篇10页的研究报告进行深度总结，提取核心观点、方法论和结论",
@@ -177,7 +177,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": false,
-    "latency_ms": 1284
+    "latency_ms": 1175
   },
   {
     "input": "Summarize the key findings of this quarterly business report",
@@ -187,7 +187,7 @@
     "actual_intent": "summarization",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1128
+    "latency_ms": 656
   },
   {
     "input": "用Python实现一个快速排序算法，要求时间复杂度O(nlogn)，并分析空间复杂度",
@@ -197,7 +197,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 3019
+    "latency_ms": 4679
   },
   {
     "input": "帮我写一个JavaScript函数，实现深拷贝对象",
@@ -207,7 +207,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 2583
+    "latency_ms": 6047
   },
   {
     "input": "这段代码有bug，帮我调试一下",
@@ -217,7 +217,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 842
+    "latency_ms": 633
   },
   {
     "input": "设计一个支持百万并发的分布式缓存系统，包括架构图、核心模块和容错机制",
@@ -227,7 +227,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": false,
-    "latency_ms": 3857
+    "latency_ms": 2988
   },
   {
     "input": "Review this code for security vulnerabilities and best practices",
@@ -237,7 +237,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 139971
+    "latency_ms": 1101
   },
   {
     "input": "帮我优化这段SQL查询的性能",
@@ -247,7 +247,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1344
+    "latency_ms": 469
   },
   {
     "input": "写一个Python脚本，批量处理CSV文件并生成统计报告",
@@ -257,7 +257,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 8591
+    "latency_ms": 2859
   },
   {
     "input": "实现一个红黑树的插入和删除操作",
@@ -267,7 +267,7 @@
     "actual_intent": "code",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 3420
+    "latency_ms": 1801
   },
   {
     "input": "证明黎曼猜想的等价命题",
@@ -277,7 +277,7 @@
     "actual_intent": "reasoning",
     "mode_correct": false,
     "intent_correct": false,
-    "latency_ms": 1276
+    "latency_ms": 1330
   },
   {
     "input": "求解这个微分方程：dy/dx = x^2 + y^2",
@@ -287,7 +287,7 @@
     "actual_intent": "math",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 289180
+    "latency_ms": 51341
   },
   {
     "input": "计算这个矩阵的特征值和特征向量",
@@ -297,7 +297,7 @@
     "actual_intent": "math",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 30088
+    "latency_ms": 3971
   },
   {
     "input": "证明费马小定理并给出应用实例",
@@ -307,7 +307,7 @@
     "actual_intent": "reasoning",
     "mode_correct": false,
     "intent_correct": false,
-    "latency_ms": 2071
+    "latency_ms": 5752
   },
   {
     "input": "用拉格朗日乘数法求解这个约束优化问题",
@@ -317,7 +317,7 @@
     "actual_intent": "math",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1340
+    "latency_ms": 996
   },
   {
     "input": "分析2024年全球AI芯片市场竞争格局，包括英伟达、AMD、英特尔的市场份额变化趋势",
@@ -327,37 +327,37 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": false,
-    "latency_ms": 1013
+    "latency_ms": 1144
   },
   {
     "input": "比较React和Vue的优缺点，从性能、生态、学习曲线三个维度分析",
     "expected_mode": "slow",
-    "actual_mode": "fast",
+    "actual_mode": "slow",
     "expected_intent": "reasoning",
     "actual_intent": "reasoning",
-    "mode_correct": false,
+    "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 2726
+    "latency_ms": 39700
   },
   {
     "input": "解释量子计算为什么能破解传统加密算法",
     "expected_mode": "slow",
-    "actual_mode": "fast",
+    "actual_mode": "slow",
     "expected_intent": "reasoning",
     "actual_intent": "reasoning",
-    "mode_correct": false,
+    "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1265
+    "latency_ms": 24018
   },
   {
     "input": "分析美联储降息对全球资本市场的影响机制",
     "expected_mode": "slow",
     "actual_mode": "fast",
     "expected_intent": "reasoning",
-    "actual_intent": "reasoning",
+    "actual_intent": "research",
     "mode_correct": false,
-    "intent_correct": true,
-    "latency_ms": 1845
+    "intent_correct": false,
+    "latency_ms": 2696
   },
   {
     "input": "评估采用微服务架构的利弊，给出决策框架",
@@ -367,17 +367,17 @@
     "actual_intent": "reasoning",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1640
+    "latency_ms": 1060
   },
   {
     "input": "为什么Transformer架构比RNN更适合处理长序列",
     "expected_mode": "slow",
-    "actual_mode": "fast",
+    "actual_mode": "slow",
     "expected_intent": "reasoning",
     "actual_intent": "reasoning",
-    "mode_correct": false,
+    "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 4708
+    "latency_ms": 34927
   },
   {
     "input": "帮我写一首关于春天的诗",
@@ -387,7 +387,7 @@
     "actual_intent": "creative",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 3374
+    "latency_ms": 1415
   },
   {
     "input": "写一个短故事，主角是一只会说话的猫",
@@ -397,7 +397,7 @@
     "actual_intent": "creative",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 2078
+    "latency_ms": 1909
   },
   {
     "input": "帮我写一封辞职信",
@@ -407,7 +407,7 @@
     "actual_intent": "creative",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 856
+    "latency_ms": 954
   },
   {
     "input": "创作一个科幻短篇，探讨AI意识觉醒的伦理困境，要求有完整的人物弧光和情节转折",
@@ -417,7 +417,7 @@
     "actual_intent": "creative",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 6584
+    "latency_ms": 2765
   },
   {
     "input": "Write a compelling marketing copy for a new electric vehicle",
@@ -427,7 +427,7 @@
     "actual_intent": "creative",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1743
+    "latency_ms": 1127
   },
   {
     "input": "帮我设计一个品牌logo的创意概念",
@@ -437,7 +437,7 @@
     "actual_intent": "creative",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 798
+    "latency_ms": 1306
   },
   {
     "input": "调研2024年大语言模型在医疗诊断领域的应用现状，包括FDA批准的AI诊断工具",
@@ -447,7 +447,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1041
+    "latency_ms": 2142
   },
   {
     "input": "搜索最新的碳中和政策，分析对企业的影响",
@@ -457,7 +457,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 1265
+    "latency_ms": 1724
   },
   {
     "input": "查找近五年关于深度学习在蛋白质结构预测中的突破性论文",
@@ -467,7 +467,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 798
+    "latency_ms": 770
   },
   {
     "input": "研究东南亚电商市场的发展趋势和主要玩家",
@@ -477,7 +477,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 2188
+    "latency_ms": 2011
   },
   {
     "input": "调查当前主流的向量数据库产品，对比它们的性能特点和适用场景",
@@ -487,7 +487,7 @@
     "actual_intent": "research",
     "mode_correct": false,
     "intent_correct": true,
-    "latency_ms": 2408
+    "latency_ms": 733
   },
   {
     "input": "What's the weather like?",
@@ -497,7 +497,7 @@
     "actual_intent": "simple_qa",
     "mode_correct": true,
     "intent_correct": false,
-    "latency_ms": 1125
+    "latency_ms": 1099
   },
   {
     "input": "帮我写个笑话",
@@ -507,6 +507,6 @@
     "actual_intent": "creative",
     "mode_correct": true,
     "intent_correct": true,
-    "latency_ms": 1638
+    "latency_ms": 457
   }
 ]

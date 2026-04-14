@@ -45,7 +45,15 @@ async function callModel(
 }
 
 chatRouter.post("/chat", async (c) => {
-  const body = await c.req.json<ChatRequest>();
+  // UTF-8 fix: use c.req.raw.text() instead of c.req.json()
+  // c.req.json() in @hono/node-server can mis-decode UTF-8 body as Latin-1
+  const rawBody = await c.req.raw.text();
+  let body: ChatRequest;
+  try {
+    body = JSON.parse(rawBody) as ChatRequest;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
   const startTime = Date.now();
 
   // C3a: Priority 1 — middleware context (trusted X-User-Id header)
@@ -334,7 +342,7 @@ chatRouter.post("/chat", async (c) => {
           },
         };
 
-        await s.write(`data: ${JSON.stringify({ type: "done", task_id: taskId, decision: { intent: features.intent, selected_model: routing.selected_model, confidence: routing.confidence } })}\n\n`);
+        await s.write(`data: ${JSON.stringify({ type: "done", task_id: taskId, decision: { intent: features.intent, selected_model: routing.selected_model, selected_role: routing.selected_role, confidence: routing.confidence } })}\n\n`);
 
         // Fire-and-forget post-stream work
         const { logDecision } = await import("../logging/decision-logger.js");
@@ -536,7 +544,9 @@ chatRouter.post("/feedback", async (c) => {
   let body: Record<string, unknown>;
 
   try {
-    body = await c.req.json() as Record<string, unknown>;
+    // UTF-8 fix: use c.req.raw.text() instead of c.req.json()
+    const rawBody = await c.req.raw.text();
+    body = JSON.parse(rawBody) as Record<string, unknown>;
     decision_id = body.decision_id as string;
     feedback_type = body.feedback_type as string;
   } catch {

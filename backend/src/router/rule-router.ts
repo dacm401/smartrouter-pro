@@ -16,15 +16,15 @@ export function ruleRoute(features: InputFeatures, identity: IdentityMemory | nu
     reasons.push(`意图"${features.intent}"需要慢模型`);
   }
 
-  // 收紧复杂度阈值：低复杂度 < 25，中高复杂度 >= 45
-  if (features.complexity_score < 25) {
+  // 收紧复杂度阈值：低复杂度 < 20，中高复杂度 >= 35，高 >= 55
+  if (features.complexity_score < 20) {
     fastScore += 0.25;
     reasons.push(`复杂度低(${features.complexity_score})`);
-  } else if (features.complexity_score >= 45) {
+  } else if (features.complexity_score >= 35) {
     slowScore += 0.2;
     reasons.push(`复杂度中高(${features.complexity_score})`);
   }
-  if (features.complexity_score >= 60) {
+  if (features.complexity_score >= 55) {
     slowScore += 0.15;
     reasons.push(`复杂度高(${features.complexity_score})`);
   }
@@ -43,23 +43,37 @@ export function ruleRoute(features: InputFeatures, identity: IdentityMemory | nu
   // 新增：简单 math 保护，避免简单算术误走 slow
   const isSimpleMath =
     features.intent === "math" &&
-    features.complexity_score < 25 &&
+    features.complexity_score <= 30 &&
     features.token_count < 15;
   if (isSimpleMath) {
-    fastScore += 0.25;
+    fastScore += 0.4;
     reasons.push("简单数学问题，优先快速模型");
   }
 
   // 新增：复杂任务强制 slow（translation/summarization/code/reasoning/creative）
-  const query = features.query ?? "";
+  const query = features.raw_query ?? "";
   const hasMultiConstraint = /同时|并且|另外|还要|分别|先.*再|然后|最后|以及/.test(query);
   const hasStructuredOutput = /表格|分点|逐步|详细|完整|示例|注意事项|格式|保留.*术语|保持.*风格/.test(query);
+  const hasAnalysisKeywords = /分析|研究|调研|对比|比较|评估|评测|判断/.test(query);
+  const hasTranslationKeywords = /翻译成|译成|翻译为|翻译成|翻译|translate.{0,30}(成|为|成英文|成中文|成日语)/i.test(query);
   if (
     ["translation", "summarization", "code", "reasoning", "creative"].includes(features.intent) &&
-    (features.complexity_score >= 45 || hasMultiConstraint || hasStructuredOutput)
+    (features.complexity_score >= 25 || hasMultiConstraint || hasStructuredOutput)
   ) {
     slowScore += 0.2;
     reasons.push("复杂任务或结构化要求，提升到慢模型");
+  }
+
+  // 分析类关键词兜底：即使 intent 误判为 chat，有"分析/研究/对比"等词也推 slow
+  if (hasAnalysisKeywords) {
+    slowScore += 0.6;
+    reasons.push("分析类关键词，提升到慢模型");
+  }
+
+  // 翻译关键词兜底：即使 intent 误判为 chat，有"翻译"字样也推 slow
+  if (hasTranslationKeywords) {
+    slowScore += 0.6;
+    reasons.push("翻译类关键词，提升到慢模型");
   }
 
   if (identity) {
@@ -79,10 +93,8 @@ export function ruleRoute(features: InputFeatures, identity: IdentityMemory | nu
     }
   }
 
-  // chat 和 simple_qa 强制走 fast，防止 LLM classifier 失败降级到 unknown 后分数不够
-  if (features.intent === "chat" || features.intent === "simple_qa") {
-    fastScore = Math.max(fastScore, slowScore + 0.3);
-  }
+  // 移除了 chat/simple_qa 的强制 fast override，改由 complexity 阈值自然控制
+  // simple math 保护仍保留（intent=math + complexity<25 + token<15）
 
   const total = fastScore + slowScore;
   fastScore = fastScore / total;

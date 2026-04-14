@@ -26,9 +26,10 @@ services:
     ports:
       - "3001:3001"
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/smartrouter
+      DATABASE_URL: postgresql://postgres:postgres@172.18.0.2:5432/smartrouter
       NODE_ENV: production
       ALLOW_DEV_FALLBACK: "true"
+      SLOW_MODEL: "Qwen/Qwen2.5-72B-Instruct"
     depends_on:
       postgres:
         condition: service_healthy

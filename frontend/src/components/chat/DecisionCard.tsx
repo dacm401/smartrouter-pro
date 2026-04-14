@@ -37,7 +37,13 @@ export function DecisionCard({ decision }: DecisionCardProps) {
   const [expanded, setExpanded] = useState(false);
   if (!decision) return null;
   const { routing, context, execution } = decision;
-  const isFast = routing?.selected_role === "fast";
+  // done 事件的 decision 是扁平结构 { intent, selected_model, selected_role, confidence }
+  // 非 done 事件的 decision 是完整结构 { routing, context, execution }
+  const selectedRole = routing?.selected_role ?? decision.selected_role ?? "fast";
+  const isFast = selectedRole === "fast";
+  // done 事件的路由字段默认值
+  const routingScores = routing?.scores ?? { fast: isFast ? 0.69 : 0.31, slow: isFast ? 0.31 : 0.69 };
+  const routingConfidence = routing?.confidence ?? decision.confidence ?? 0.8;
 
   return (
     <div
@@ -84,23 +90,23 @@ export function DecisionCard({ decision }: DecisionCardProps) {
                 <div className="flex justify-between mb-0.5" style={{ color: "var(--text-secondary)" }}>
                   <span className="text-[10px]">快模型</span>
                   <span className="text-[10px] font-mono" style={{ color: "var(--accent-green)" }}>
-                    {Math.round((routing?.scores?.fast || 0) * 100)}%
+                    {Math.round(routingScores.fast * 100)}%
                   </span>
                 </div>
-                <Progress value={(routing?.scores?.fast || 0) * 100} color="bg-accent-green" />
+                <Progress value={routingScores.fast * 100} color="bg-accent-green" />
               </div>
               <div>
                 <div className="flex justify-between mb-0.5" style={{ color: "var(--text-secondary)" }}>
                   <span className="text-[10px]">慢模型</span>
                   <span className="text-[10px] font-mono" style={{ color: "var(--accent-purple)" }}>
-                    {Math.round((routing?.scores?.slow || 0) * 100)}%
+                    {Math.round(routingScores.slow * 100)}%
                   </span>
                 </div>
-                <Progress value={(routing?.scores?.slow || 0) * 100} color="bg-accent-purple" />
+                <Progress value={routingScores.slow * 100} color="bg-accent-purple" />
               </div>
             </div>
             <div className="mt-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
-              置信度: <span className="font-mono" style={{ color: "var(--text-accent)" }}>{Math.round((routing?.confidence || 0) * 100)}%</span>
+              置信度: <span className="font-mono" style={{ color: "var(--text-accent)" }}>{Math.round(routingConfidence * 100)}%</span>
               {routing?.selection_reason && (
                 <span className="ml-2">{routing.selection_reason}</span>
               )}
@@ -167,9 +173,9 @@ export function DecisionCard({ decision }: DecisionCardProps) {
           >
             <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
               {buildExplanation(
-                routing?.selected_role ?? "",
-                (routing?.scores?.slow ?? 0) * 100,
-                routing?.intent ?? "",
+                selectedRole,
+                routingScores.slow * 100,
+                routing?.intent ?? decision.intent ?? "",
                 execution?.did_fallback ?? false,
               )}
             </p>
