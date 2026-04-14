@@ -7,6 +7,18 @@ export interface QualityCheckResult {
 }
 
 export function checkQuality(response: string, features: InputFeatures): QualityCheckResult {
+  // chat 和 simple_qa 不走 quality gate，直接通过
+  // 原因：这两类问题的"正确答案"就是短回复，不应该被质量门拦截
+  if (features.intent === "chat" || features.intent === "simple_qa") {
+    return { passed: true, score: 100, issues: [] };
+  }
+
+  // 新增：unknown intent + 短输入（< 30字）→ 也直接通过
+  // 原因：短消息大概率是闲聊，LLM classifier 失败降级到 unknown 时不应触发 fallback
+  if (features.intent === "unknown" && features.token_count < 30) {
+    return { passed: true, score: 100, issues: [] };
+  }
+
   const issues: string[] = [];
   let score = 100;
 

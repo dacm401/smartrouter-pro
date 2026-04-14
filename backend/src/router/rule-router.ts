@@ -52,6 +52,11 @@ export function ruleRoute(features: InputFeatures, identity: IdentityMemory | nu
     }
   }
 
+  // chat 和 simple_qa 强制走 fast，防止 LLM classifier 失败降级到 unknown 后分数不够
+  if (features.intent === "chat" || features.intent === "simple_qa") {
+    fastScore = Math.max(fastScore, slowScore + 0.3);
+  }
+
   const total = fastScore + slowScore;
   fastScore = fastScore / total;
   slowScore = slowScore / total;
