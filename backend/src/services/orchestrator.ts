@@ -1,5 +1,5 @@
 /**
- * Orchestrator v0.2 — 快模型两段人格化 + 慢模型后台执行
+ * Orchestrator v0.3 — 快模型两段人格化 + 慢模型后台执行 + 安抚功能
  *
  * 正确设计（老板确认）：
  * - 快模型是两层角色：对人有性格，对慢模型是任务型高效通信
@@ -12,6 +12,11 @@
  * 4. 快模型（人格化）→ "老板，分析好了，结果如下：" + 慢模型结果  ← 第二条回复
  *
  * 两次人格化回复之间是后台处理，用户感知连贯。
+ *
+ * O-007 安抚功能：
+ * - 慢模型处理期间，用户再发消息（如"出来了吗？"）时
+ * - 快模型回复"还在分析中，请稍候～"，保持人格化体验
+ * - 不触发新的慢模型任务
  */
 
 import { v4 as uuid } from "uuid";
@@ -195,6 +200,25 @@ Format:
 Output only the task card. No greeting, no personality.`;
 }
 
+/**
+ * O-007: 安抚 prompt — 慢模型处理期间用户再发消息时使用
+ * 保持人格化体验，告知用户正在处理中
+ */
+function buildReassuringFastPrompt(lang: "zh" | "en"): string {
+  if (lang === "zh") {
+    return `你是 SmartRouter Pro 的快模型助手。职责：快速回复用户，口语化、自然，1-2句话足够。
+当检测到用户询问之前委托任务的进度时（如"出来了吗"、"好了吗"、"还在处理吗"等），
+请用人格化的方式安抚用户，告知正在处理中，不要暴露"委托"或"慢模型"等技术细节。
+示例回复：
+- "还在分析中哦，请稍候～"
+- "老板，稍等一下，马上就好啦～"
+- "正在为您处理，马上呈现结果～"`;
+  }
+  return `You are SmartRouter Pro's fast model assistant.
+When user asks about task progress (e.g., "done?", "is it ready?", "still processing?"),
+reply in a friendly, reassuring way without mentioning technical details like "delegation" or "slow model".`;
+}
+
 // ── Orchestrator 主函数 ─────────────────────────────────────────────────────────
 
 export interface OrchestratorInput {
@@ -206,10 +230,14 @@ export interface OrchestratorInput {
   session_id: string;
   history?: ChatMessage[];
   reqApiKey?: string;
+  /** O-007: 是否有 pending 的慢模型任务（安抚功能） */
+  hasPendingTask?: boolean;
+  /** O-007: pending 任务的原始请求（用于安抚回复时提及任务） */
+  pendingTaskMessage?: string;
 }
 
 export interface OrchestratorResult {
-  fast_reply: string;           // 快模型直接返回的回复（不委托时=最终回复；委托时=确认回复）
+  fast_reply: string;           // 快模型直接返回的回复（不委托时=最终回复；委托时=确认回复；安抚时=安抚回复）
   delegation?: {
     task_id: string;
     status: "triggered";
@@ -218,14 +246,63 @@ export interface OrchestratorResult {
     intent: string;
     complexity_score: number;
     delegated: boolean;
+    /** O-007: 是否是安抚回复 */
+    is_reassuring?: boolean;
   };
 }
 
 export async function orchestrator(input: OrchestratorInput): Promise<OrchestratorResult> {
   const {
     message, intent, complexity_score, language,
-    user_id, session_id, history = [], reqApiKey
+    user_id, session_id, history = [], reqApiKey,
+    hasPendingTask = false, pendingTaskMessage
   } = input;
+
+  // Step 0: O-007 安抚检测
+  // 如果当前有 pending 的慢模型任务，优先使用安抚回复
+  // 这覆盖了委托逻辑：用户追问进度时不应该再触发新的慢模型
+  if (hasPendingTask) {
+    const reassurringPrompt = buildReassuringFastPrompt(language);
+    const historyContext = history.filter((m) => m.role !== "system").slice(-6);
+    const pendingContext = pendingTaskMessage
+      ? `\n\n【当前正在处理的任务】${pendingTaskMessage}`
+      : "";
+
+    const messages: ChatMessage[] = [
+      { role: "system", content: reassurringPrompt },
+      ...historyContext,
+      { role: "user", content: `用户的问题是："${message}"${pendingContext}` },
+    ];
+
+    let fastReply: string;
+    try {
+      if (reqApiKey) {
+        const resp = await callOpenAIWithOptions(
+          config.fastModel, messages, reqApiKey, config.openaiBaseUrl || undefined
+        );
+        fastReply = resp.content;
+      } else {
+        const resp = await callModelFull(config.fastModel, messages);
+        fastReply = resp.content;
+      }
+    } catch (e: any) {
+      console.error("[orchestrator] Reassuring call failed:", e.message);
+      fastReply = language === "zh"
+        ? "正在为您处理中，请稍候～"
+        : "Still processing, please wait...";
+    }
+
+    return {
+      fast_reply: fastReply,
+      // 有 pending 任务时不触发新的委托
+      routing_info: {
+        intent,
+        complexity_score,
+        delegated: false,
+        is_reassuring: true,
+      },
+    };
+  }
 
   // Step 1: 委托判断
   const decision = shouldDelegate(intent, complexity_score, message);
@@ -303,7 +380,6 @@ export async function orchestrator(input: OrchestratorInput): Promise<Orchestrat
       session_id,
       reqApiKey,
       memoryText,
-      // slowReply（人格化确认）由本函数返回，慢模型包装结果由后台做
     }).catch((e) => console.error("[orchestrator] Slow model background trigger failed:", e.message));
 
     delegation = { task_id: taskId, status: "triggered" };

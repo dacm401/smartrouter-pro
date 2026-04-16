@@ -956,6 +956,32 @@ export const DelegationArchiveRepo = {
     );
     return result.rows.map(mapDelegationArchiveRow);
   },
+
+  /**
+   * O-007: 检测是否有 pending 的委托任务
+   * 用于安抚功能：慢模型处理期间用户再发消息时，检测是否有未完成的任务
+   */
+  async hasPending(userId: string, sessionId: string): Promise<boolean> {
+    const result = await query(
+      `SELECT COUNT(*) as cnt FROM delegation_archive
+       WHERE user_id=$1 AND session_id=$2 AND status='pending'`,
+      [userId, sessionId]
+    );
+    return parseInt(result.rows[0]?.cnt ?? "0") > 0;
+  },
+
+  /**
+   * O-007: 获取当前 session 中所有 pending 的任务信息
+   */
+  async getPendingBySession(userId: string, sessionId: string): Promise<DelegationArchiveEntry[]> {
+    const result = await query(
+      `SELECT * FROM delegation_archive
+       WHERE user_id=$1 AND session_id=$2 AND status='pending'
+       ORDER BY created_at ASC`,
+      [userId, sessionId]
+    );
+    return result.rows.map(mapDelegationArchiveRow);
+  },
 };
 
 function mapDelegationArchiveRow(r: any): DelegationArchiveEntry {

@@ -31,6 +31,8 @@ import { executionLoop } from "../services/execution-loop.js";
 import { getContextUserId } from "../middleware/identity.js";
 // O-001: Orchestrator — 快模型先回复 + 委托慢模型后台执行
 import { orchestrator, getDelegationResult } from "../services/orchestrator.js";
+// O-007: 安抚功能 — 检测 pending 任务
+import { DelegationArchiveRepo } from "../db/repositories.js";
 
 const chatRouter = new Hono();
 
@@ -114,11 +116,29 @@ chatRouter.post("/chat", async (c) => {
     // 委托判断由 orchestrator.shouldDelegate() 在代码层完成
     // 不委托：快模型人格化直接回复
     // 委托：快模型人格化确认回复 → 后台慢模型 → 快模型人格化包装结果
+    // O-007 安抚：慢模型处理期间用户再发消息 → 使用安抚 prompt 回复
     const useOrchestrator =
       body.execute !== true &&
       body.stream !== true;
 
     if (useOrchestrator) {
+      // O-007: 检测是否有 pending 的慢模型任务
+      let hasPendingTask = false;
+      let pendingTaskMessage: string | undefined;
+
+      try {
+        hasPendingTask = await DelegationArchiveRepo.hasPending(userId, sessionId);
+        if (hasPendingTask) {
+          const pendingTasks = await DelegationArchiveRepo.getPendingBySession(userId, sessionId);
+          if (pendingTasks.length > 0) {
+            pendingTaskMessage = pendingTasks[0].original_message;
+          }
+        }
+      } catch (e) {
+        // 检测失败不影响正常流程
+        console.warn("[chat] Failed to check pending delegation:", e);
+      }
+
       const orchResult = await orchestrator({
         message: body.message ?? "",
         intent: features.intent,
@@ -128,6 +148,8 @@ chatRouter.post("/chat", async (c) => {
         session_id: sessionId,
         history: body.history ?? [],
         reqApiKey,
+        hasPendingTask,        // O-007: 安抚检测结果
+        pendingTaskMessage,     // O-007: pending 任务信息
       });
 
       // 记录 routing decision（沿用分析结果）
