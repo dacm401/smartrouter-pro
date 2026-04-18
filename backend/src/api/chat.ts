@@ -32,7 +32,7 @@ import { detectWeatherQuery, fetchRealTimeWeather, formatWeatherPrompt } from ".
 // C3a: unified identity
 import { getContextUserId } from "../middleware/identity.js";
 // O-001: Orchestrator — 快模型先回复 + 委托慢模型后台执行
-import { orchestrator, getDelegationResult, pollArchiveAndYield, evaluateRouting } from "../services/orchestrator.js";
+import { orchestrator, getDelegationResult, pollArchiveAndYield, evaluateRouting, inferRoutingLayer } from "../services/orchestrator.js";
 // O-007: 安抚功能 — 检测 pending 任务
 import { DelegationArchiveRepo } from "../db/repositories.js";
 
@@ -157,6 +157,7 @@ chatRouter.post("/chat", async (c) => {
       // 实际路由结果：有委托 → slow，否则 → fast
       const orchSelectedRole: "fast" | "slow" = orchResult.delegation ? "slow" : "fast";
       const orchSelectedModel = orchSelectedRole === "slow" ? config.slowModel : config.fastModel;
+      const routingLayer: import("../services/orchestrator.js").RoutingLayer = orchSelectedRole === "slow" ? "L2" : orchResult.routing_info.tool_used === "web_search" ? "L1" : "L0";
 
       // 记录 routing decision（沿用分析结果，selected_role 反映实际委托情况）
       await logDecision({
@@ -210,6 +211,7 @@ chatRouter.post("/chat", async (c) => {
             selected_role: orchSelectedRole,
             selection_reason: orchSelectedRole === "slow" ? "orchestrator delegated to slow model" : "orchestrator direct reply",
             fallback_model: orchSelectedRole === "slow" ? config.fastModel : config.slowModel,
+            routing_layer: routingLayer,  // Phase 2.0: 显式路由分层（L0/L1/L2）
           },
           context: {
             original_tokens: 0,
@@ -423,28 +425,33 @@ chatRouter.post("/chat", async (c) => {
       c.header("X-Accel-Buffering", "no");
 
       return stream(c, async (s) => {
+        // Phase 2.0: 推断 routing layer（L0/L1/L2）
+        const routingLayer = inferRoutingLayer(orchResult);
+
         // Step 1: 立即推送 fast_reply（安抚消息或 Fast 直接回复）
         if (orchResult.fast_reply) {
-          await s.write(`data: ${JSON.stringify({ type: "fast_reply", stream: orchResult.fast_reply })}\n\n`);
+          await s.write(`data: ${JSON.stringify({ type: "fast_reply", stream: orchResult.fast_reply, routing_layer: routingLayer })}\n\n`);
         }
 
         // Phase 1.5: Clarifying 流程 → 推送澄清问题给前端
         if (orchResult.clarifying) {
-          await s.write(`data: ${JSON.stringify({ type: "clarifying", stream: orchResult.clarifying.question_text, options: orchResult.clarifying.options, question_id: orchResult.clarifying.question_id })}\n\n`);
+          await s.write(`data: ${JSON.stringify({ type: "clarifying", stream: orchResult.clarifying.question_text, options: orchResult.clarifying.options, question_id: orchResult.clarifying.question_id, routing_layer: routingLayer })}\n\n`);
         }
 
         // Step 2: 如果有委托，启动轮询 loop 推送结果
         if (orchResult.delegation) {
           try {
             for await (const event of pollArchiveAndYield(orchResult.delegation.task_id, features.language as "zh" | "en")) {
-              await s.write(`data: ${JSON.stringify({ type: event.type, stream: event.stream })}\n\n`);
+              // pollArchiveAndYield 的事件已含 routing_layer（L2）
+              const payload = { type: event.type, stream: event.stream, routing_layer: event.routing_layer ?? "L2" };
+              await s.write(`data: ${JSON.stringify(payload)}\n\n`);
             }
           } catch (e: any) {
             console.error("[stream] pollArchiveAndYield error:", e.message);
-            await s.write(`data: ${JSON.stringify({ type: "error", stream: "轮询出错" })}\n\n`);
+            await s.write(`data: ${JSON.stringify({ type: "error", stream: "轮询出错", routing_layer: "L2" })}\n\n`);
           }
           // SSE done 事件
-          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[delegation_complete]" })}\n\n`);
+          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[delegation_complete]", routing_layer: "L2" })}\n\n`);
         } else {
           // Step 3: Fast 直接回复 → 流式输出（复用原有 streaming 逻辑）
           const memories = config.memory.enabled
@@ -511,7 +518,7 @@ chatRouter.post("/chat", async (c) => {
             }
           } catch (streamErr: any) {
             console.error("[stream] Model stream error:", streamErr.message);
-            await s.write(`data: ${JSON.stringify({ type: "error", stream: streamErr.message })}\n\n`);
+            await s.write(`data: ${JSON.stringify({ type: "error", stream: streamErr.message, routing_layer: routingLayer })}\n\n`);
             return;
           }
 
@@ -521,6 +528,7 @@ chatRouter.post("/chat", async (c) => {
           await s.write(`data: ${JSON.stringify({
             type: "done",
             task_id: taskId,
+            routing_layer: routingLayer,
             decision: {
               intent: features.intent,
               selected_model: orchSelectedModel,
@@ -552,7 +560,7 @@ chatRouter.post("/chat", async (c) => {
           TaskRepo.updateExecution(taskId, contextResult.original_tokens + roughTokens).catch((e) => console.error("[stream] updateExecution failed:", e));
 
           // Product polish: SSE done 事件，告知前端流结束
-          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[stream_complete]", tokens: roughTokens, latency_ms: streamLatency })}\n\n`);
+          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[stream_complete]", tokens: roughTokens, latency_ms: streamLatency, routing_layer: routingLayer })}\n\n`);
         }
       });
     }
@@ -917,6 +925,7 @@ chatRouter.post("/eval/routing", async (c) => {
     tool_used: result.tool_used ?? null,
     fast_reply: result.fast_reply,
     confidence: result.confidence,
+    routing_layer: result.routing_layer,
     latency_ms: Date.now() - startTime,
   });
 });

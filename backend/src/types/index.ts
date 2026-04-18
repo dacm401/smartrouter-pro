@@ -47,6 +47,8 @@ export interface RoutingDecision {
   selected_role: ModelRole;
   selection_reason: string;
   fallback_model: string;
+  /** Phase 2.0: 显式路由分层（L0/L1/L2/L3） */
+  routing_layer?: "L0" | "L1" | "L2" | "L3";
 }
 
 export interface CompressionDetail {

@@ -590,11 +590,28 @@ async function triggerSlowModelBackground(input: SlowModelBackgroundInput): Prom
   }
 }
 
-// ── SSE 轮询 loop（含用户体验安抚）───────────────────────────────────────────
+// ── Routing Layer 常量（Phase 2.0 显式分层）───────────────────────────────────
+/**
+ * Layer 0: Fast 直接回复（闲聊/简单问答，无工具调用）
+ * Layer 1: Fast + web_search（需要实时数据）
+ * Layer 2: Slow 模型委托（复杂推理/多步任务）
+ * Layer 3: Execute 模式（任务规划 + 工具执行，Phase C）
+ */
+export type RoutingLayer = "L0" | "L1" | "L2" | "L3";
+
+export function inferRoutingLayer(result: OrchestratorResult): RoutingLayer {
+  if (result.delegation) return "L2";
+  if (result.routing_info.tool_used === "web_search") return "L1";
+  return "L0";
+}
+
+// ── SSE Event（含 routing_layer Phase 2.0）───────────────────────────────────
 
 export interface SSEEvent {
   type: "status" | "result" | "error" | "done" | "chunk" | "fast_reply";
   stream: string;
+  /** Phase 2.0: 路由分层（L0/L1/L2/L3） */
+  routing_layer?: RoutingLayer;
   /** Phase 1.5: Clarifying 事件可选字段 */
   options?: string[];
   question_id?: string;
@@ -646,16 +663,16 @@ export async function* pollArchiveAndYield(
     // 安抚消息（用 elapsed < X+1000 而非 >= X，只发一次）
     if (task.status === "running" || task.status === "pending") {
       if (elapsed > 30000 && elapsed < 31000 && lastStatusTime < 30000) {
-        yield { type: "status", stream: msgs.running30s };
+        yield { type: "status", stream: msgs.running30s, routing_layer: "L2" };
         lastStatusTime = Date.now();
       } else if (elapsed > 60000 && elapsed < 61000 && lastStatusTime < 60000) {
-        yield { type: "status", stream: msgs.running60s };
+        yield { type: "status", stream: msgs.running60s, routing_layer: "L2" };
         lastStatusTime = Date.now();
       } else if (elapsed > 120000 && elapsed < 121000) {
         // 120s 后每 60s 发一次
         const sixtySecondMarker = Math.floor((elapsed - 120000) / 60000);
         if (elapsed < 120000 + 60000 * sixtySecondMarker + 1000 && elapsed >= 120000 + 60000 * sixtySecondMarker) {
-          yield { type: "status", stream: msgs.running120s };
+          yield { type: "status", stream: msgs.running120s, routing_layer: "L2" };
           lastStatusTime = Date.now();
         }
       }
@@ -667,6 +684,7 @@ export async function* pollArchiveAndYield(
         yield {
           type: "result",
           stream: `${msgs.done}\n\n${result}`,
+          routing_layer: "L2",
         };
         await TaskArchiveRepo.markDelivered(taskId).catch(() => {});
       }
@@ -675,7 +693,7 @@ export async function* pollArchiveAndYield(
 
     if (task.status === "failed") {
       const errors = task.slow_execution?.errors ?? [];
-      yield { type: "error", stream: `任务执行失败: ${errors[0] ?? "Unknown error"}` };
+      yield { type: "error", stream: `任务执行失败: ${errors[0] ?? "Unknown error"}`, routing_layer: "L2" };
       break;
     }
 
@@ -729,6 +747,8 @@ export interface RoutingEvaluation {
   tool_used?: string;       // 如 "web_search"
   fast_reply: string;       // Fast 模型的直接回复
   confidence: number;       // 0-1 置信度
+  /** Phase 2.0: 路由分层（L0/L1/L2） */
+  routing_layer: RoutingLayer;
 }
 
 const EVAL_SYSTEM_PROMPT_ZH = `你是一个严格的路由分类器。
@@ -813,9 +833,10 @@ export async function evaluateRouting(
     console.error("[evaluateRouting] LLM call failed:", e.message);
     return {
       routing_intent: "other",
-      selected_role: "fast",
+      selected_role: "fast" as const,
       fast_reply: language === "zh" ? "（路由评估失败，使用默认）" : "(Routing eval failed, using default)",
       confidence: 0,
+      routing_layer: "L0" as RoutingLayer,
     };
   }
 
@@ -824,12 +845,16 @@ export async function evaluateRouting(
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      const role: "fast" | "slow" = parsed.selected_role === "slow" ? "slow" : "fast";
+      const toolUsed: string | undefined = parsed.tool_used === "web_search" ? "web_search" : undefined;
+      const layer: RoutingLayer = role === "slow" ? "L2" : toolUsed ? "L1" : "L0";
       return {
         routing_intent: parsed.routing_intent ?? "other",
-        selected_role: parsed.selected_role === "slow" ? "slow" : "fast",
-        tool_used: parsed.tool_used === "web_search" ? "web_search" : undefined,
+        selected_role: role,
+        tool_used: toolUsed,
         fast_reply: parsed.fast_reply ?? "",
         confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.5,
+        routing_layer: layer,
       };
     }
   } catch {
@@ -842,5 +867,6 @@ export async function evaluateRouting(
     selected_role: "fast",
     fast_reply: raw.slice(0, 200),
     confidence: 0,
+    routing_layer: "L0" as RoutingLayer,
   };
 }

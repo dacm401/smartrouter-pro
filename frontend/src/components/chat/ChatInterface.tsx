@@ -18,6 +18,14 @@ interface Message {
     error?: string;
     taskId?: string;
   };
+  /** Phase 1.5: 澄清问题（Fast 模型请求用户确认） */
+  clarifyQuestion?: {
+    question_id: string;
+    question_text: string;
+    options?: string[];
+  };
+  /** Phase 2.0: 路由分层标识 */
+  routing_layer?: "L0" | "L1" | "L2" | "L3";
 }
 
 interface ChatInterfaceProps {
@@ -38,6 +46,9 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
   const [loading, setLoading] = useState(false);
   const [sessionId] = useState(() => uuid());
   const [showFallbackAnim, setShowFallbackAnim] = useState<{ fromModel: string; toModel: string; reason: string } | null>(null);
+  // Phase 1.5/2.0: 临时状态消息（status/clarifying 不写入 messages）
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [clarifyQuestion, setClarifyQuestion] = useState<{ question_id: string; question_text: string; options?: string[] } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,23 +104,70 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
           try { data = JSON.parse(raw); } catch { continue; }
 
           if (data.type === "chunk") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === placeholderId ? { ...m, content: m.content + (data.content ?? "") } : m
-              )
-            );
-          } else if (data.type === "done") {
-            if (data.task_id) onTaskIdChange?.(data.task_id);
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === placeholderId ? { ...m, streaming: false, decision: data.decision } : m
-              )
-            );
-          } else if (data.type === "error") {
+            // 标准流式 chunk
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === placeholderId
-                  ? { ...m, content: `⚠️ 流式错误：${data.message}`, streaming: false }
+                  ? { ...m, content: m.content + (data.stream ?? ""), routing_layer: data.routing_layer ?? m.routing_layer }
+                  : m
+              )
+            );
+          } else if (data.type === "fast_reply") {
+            // Phase 2.0: Fast 模型直接回复（带 routing_layer）
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === placeholderId
+                  ? { ...m, content: data.stream ?? "", routing_layer: data.routing_layer ?? m.routing_layer, streaming: false }
+                  : m
+              )
+            );
+          } else if (data.type === "clarifying") {
+            // Phase 1.5: Fast 请求澄清 → 显示澄清问题
+            setClarifyQuestion({
+              question_id: data.question_id ?? uuid(),
+              question_text: data.stream ?? "",
+              options: data.options,
+            });
+            // 同时更新 placeholder 消息内容
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === placeholderId
+                  ? { ...m, content: data.stream ?? "", routing_layer: data.routing_layer ?? m.routing_layer, streaming: false }
+                  : m
+              )
+            );
+          } else if (data.type === "status") {
+            // Phase 2.0: 慢模型处理中的安抚消息（临时状态，不写入消息列表）
+            setStatusMsg(data.stream ?? null);
+          } else if (data.type === "result") {
+            // Phase 2.0: 慢模型完成 → 追加新消息显示结果
+            const resultContent = data.stream ?? "";
+            setStatusMsg(null);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: uuid(),
+                role: "assistant",
+                content: resultContent,
+                routing_layer: data.routing_layer as "L0" | "L1" | "L2" | "L3" | undefined,
+              },
+            ]);
+          } else if (data.type === "done") {
+            setStatusMsg(null);
+            if (data.task_id) onTaskIdChange?.(data.task_id);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === placeholderId
+                  ? { ...m, streaming: false, decision: data.decision, routing_layer: data.routing_layer ?? m.routing_layer }
+                  : m
+              )
+            );
+          } else if (data.type === "error") {
+            setStatusMsg(null);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === placeholderId
+                  ? { ...m, content: `⚠️ 流式错误：${data.stream ?? data.message ?? "Unknown error"}`, streaming: false }
                   : m
               )
             );
@@ -221,6 +279,9 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
+    // Phase 1.5/2.0: 发送前清除临时状态
+    setClarifyQuestion(null);
+    setStatusMsg(null);
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content, decision_id: m.decision?.id }));
 
@@ -229,6 +290,7 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
         const data = await sendFallback(text, history);
         if (data.task_id) onTaskIdChange?.(data.task_id);
         const replyContent = data.message || "⚠️ 收到空响应，请检查后端日志。";
+        const routingLayer = data.decision?.routing?.routing_layer;
 
         // O-002: 如果后端返回了 delegation，说明这是 orchestrator 路径
         if (data.delegation) {
@@ -244,6 +306,7 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
               content: replyContent,
               decision: data.decision,
               delegation: { status: "pending", taskId },
+              routing_layer: routingLayer,
             },
           ]);
 
@@ -256,11 +319,11 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
             reason: data.decision.execution.fallback_reason || "质量不达标",
           });
           setTimeout(() => {
-            setMessages((prev) => [...prev, { id: uuid(), role: "assistant", content: replyContent, decision: data.decision }]);
+            setMessages((prev) => [...prev, { id: uuid(), role: "assistant", content: replyContent, decision: data.decision, routing_layer: routingLayer }]);
             setShowFallbackAnim(null);
           }, 3000);
         } else {
-          setMessages((prev) => [...prev, { id: uuid(), role: "assistant", content: replyContent, decision: data.decision }]);
+          setMessages((prev) => [...prev, { id: uuid(), role: "assistant", content: replyContent, decision: data.decision, routing_layer: routingLayer }]);
         }
       }
     } catch (err: any) {
@@ -281,6 +344,59 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
   };
 
   const isStreaming = messages.some((m) => m.streaming);
+
+  // Phase 1.5: 处理澄清选项点击
+  const handleClarifyOption = (option: string) => {
+    if (!clarifyQuestion) return;
+    // 将选项作为用户输入发送
+    const selectedOption = option;
+    setClarifyQuestion(null);
+    setInput(selectedOption);
+    // 自动发送
+    setTimeout(() => {
+      handleSendWithText(selectedOption);
+    }, 50);
+  };
+
+  // 辅助函数：使用给定文本发送消息
+  const handleSendWithText = (text: string) => {
+    if (!text.trim() || loading) return;
+    const userMsg: Message = { id: uuid(), role: "user", content: text };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+    setClarifyQuestion(null);
+    setStatusMsg(null);
+    const history = messages.map((m) => ({ role: m.role, content: m.content, decision_id: m.decision?.id }));
+    sendStreaming(text, history).then((ok) => {
+      if (!ok) {
+        sendFallback(text, history).then((data) => {
+          if (data.task_id) onTaskIdChange?.(data.task_id);
+          const replyContent = data.message || "⚠️ 收到空响应，请检查后端日志。";
+          if (data.delegation) {
+            const assistantMsgId = uuid();
+            const taskId = data.delegation.task_id;
+            setMessages((prev) => [
+              ...prev,
+              { id: assistantMsgId, role: "assistant", content: replyContent, decision: data.decision, delegation: { status: "pending", taskId }, routing_layer: data.decision?.routing?.routing_layer },
+            ]);
+            pollDelegation(assistantMsgId, taskId);
+          } else {
+            setMessages((prev) => [...prev, { id: uuid(), role: "assistant", content: replyContent, decision: data.decision, routing_layer: data.decision?.routing?.routing_layer }]);
+          }
+        }).catch((err: any) => {
+          setMessages((prev) => [
+            ...prev,
+            { id: uuid(), role: "assistant", content: `⚠️ 请求失败：${err?.message || "请检查API配置"}` },
+          ]);
+        }).finally(() => {
+          setLoading(false);
+        });
+      } else {
+        setLoading(false);
+      }
+    });
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -349,6 +465,7 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
               decision={msg.decision}
               userId={userId}
               delegation={msg.delegation}
+              routingLayer={msg.routing_layer}
             />
             {/* Streaming cursor — new design */}
             {msg.streaming && (
@@ -363,6 +480,44 @@ export function ChatInterface({ onTaskIdChange, userId: propUserId }: ChatInterf
             )}
           </div>
         ))}
+
+        {/* Phase 2.0: 路由分层 badge（最后一条 assistant 消息） */}
+        {/* Phase 1.5: 澄清问题 UI */}
+        {clarifyQuestion && (
+          <div className="flex flex-col gap-2 mb-3 animate-fade-in-up">
+            <div className="px-4 py-3 rounded-2xl max-w-md ml-4"
+              style={{ backgroundColor: "var(--bg-elevated)", border: "1px solid rgba(245,158,11,0.3)" }}>
+              <div className="text-xs mb-2" style={{ color: "var(--accent-amber)" }}>💬 需要确认一下</div>
+              <div className="text-sm" style={{ color: "var(--text-primary)" }}>{clarifyQuestion.question_text}</div>
+              {clarifyQuestion.options && clarifyQuestion.options.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {clarifyQuestion.options.map((opt, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleClarifyOption(opt)}
+                      className="px-3 py-1.5 rounded-lg text-xs transition-all hover:scale-105"
+                      style={{
+                        backgroundColor: "rgba(245,158,11,0.12)",
+                        border: "1px solid rgba(245,158,11,0.4)",
+                        color: "var(--accent-amber)",
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Phase 2.0: 慢模型处理中状态消息（临时显示） */}
+        {statusMsg && (
+          <div className="flex items-center gap-2 mb-2 animate-fade-in-up">
+            <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: "var(--accent-blue)" }} />
+            <div className="text-sm" style={{ color: "var(--text-muted)" }}>{statusMsg}</div>
+          </div>
+        )}
 
         {/* Model switch animation */}
         {showFallbackAnim && (

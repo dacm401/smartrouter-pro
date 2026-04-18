@@ -14,13 +14,22 @@ interface MessageBubbleProps {
     slow_result?: string;
     error?: string;
   };
+  /** Phase 2.0: 路由分层标识 */
+  routingLayer?: "L0" | "L1" | "L2" | "L3";
 }
+
+const LAYER_COLORS: Record<string, { bg: string; text: string; label: string }> = {
+  L0: { bg: "rgba(156,163,175,0.12)", text: "#9CA3AF", label: "Fast 直接" },
+  L1: { bg: "rgba(59,130,246,0.12)", text: "#3B82F6", label: "Fast + 搜索" },
+  L2: { bg: "rgba(139,92,246,0.12)", text: "#8B5CF6", label: "Slow 委托" },
+  L3: { bg: "rgba(245,158,11,0.12)", text: "#F59E0B", label: "Execute" },
+};
 
 function initials(name: string): string {
   return name.substring(0, 2).toUpperCase();
 }
 
-export function MessageBubble({ role, content, decision, userId = "dev-user", delegation }: MessageBubbleProps) {
+export function MessageBubble({ role, content, decision, userId = "dev-user", delegation, routingLayer }: MessageBubbleProps) {
   const isUser = role === "user";
   const [feedbackGiven, setFeedbackGiven] = useState<string | null>(null);
 
@@ -87,28 +96,47 @@ export function MessageBubble({ role, content, decision, userId = "dev-user", de
         </div>
 
         {/* AI: Decision card + metadata */}
-        {!isUser && decision && (
+        {!isUser && (decision || routingLayer) && (
           <>
-            <DecisionCard decision={decision} />
-            {/* AI metadata: model + tokens + latency */}
-            {decision.execution && (
+            {decision && <DecisionCard decision={decision} />}
+            {/* AI metadata: model + tokens + latency + routing layer */}
+            {(decision?.execution || routingLayer) && (
               <div
-                className="flex items-center gap-3 mt-1 px-1"
+                className="flex items-center gap-3 mt-1 px-1 flex-wrap"
                 style={{ color: "var(--text-muted)" }}
               >
-                <span className="text-[10px] font-mono">
-                  {decision.execution.model_used ?? "—"}
-                </span>
-                <span className="text-[10px]">
-                  {(decision.execution.input_tokens ?? 0) + (decision.execution.output_tokens ?? 0)} tokens
-                </span>
-                {decision.execution.latency_ms && (
-                  <span className="text-[10px]">{decision.execution.latency_ms}ms</span>
-                )}
-                {decision.execution.total_cost_usd !== undefined && (
-                  <span className="text-[10px]" style={{ color: "var(--accent-green)" }}>
-                    ${decision.execution.total_cost_usd.toFixed(4)}
+                {decision?.execution?.model_used && (
+                  <span className="text-[10px] font-mono">
+                    {decision.execution.model_used}
                   </span>
+                )}
+                {/* Phase 2.0: 路由分层 badge */}
+                {routingLayer && LAYER_COLORS[routingLayer] && (
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded font-medium"
+                    style={{
+                      backgroundColor: LAYER_COLORS[routingLayer].bg,
+                      color: LAYER_COLORS[routingLayer].text,
+                    }}
+                    title={LAYER_COLORS[routingLayer].label}
+                  >
+                    {routingLayer} {LAYER_COLORS[routingLayer].label}
+                  </span>
+                )}
+                {decision?.execution && (
+                  <>
+                    <span className="text-[10px]">
+                      {(decision.execution.input_tokens ?? 0) + (decision.execution.output_tokens ?? 0)} tokens
+                    </span>
+                    {decision.execution.latency_ms && (
+                      <span className="text-[10px]">{decision.execution.latency_ms}ms</span>
+                    )}
+                    {decision.execution.total_cost_usd !== undefined && (
+                      <span className="text-[10px]" style={{ color: "var(--accent-green)" }}>
+                        ${decision.execution.total_cost_usd.toFixed(4)}
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
             )}

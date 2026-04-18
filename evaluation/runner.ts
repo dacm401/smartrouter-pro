@@ -26,6 +26,7 @@ const __dirname = path.dirname(__filename);
 interface RoutingTestCase {
   input: string;
   expected_mode: "fast" | "slow";
+  expected_layer: "L0" | "L1" | "L2";  // Phase 2.0: 路由分层期望
   expected_intent: string;
   reason: string;
 }
@@ -36,8 +37,11 @@ interface RoutingResult {
   actual_mode: string;
   expected_intent: string;
   actual_intent: string;
+  expected_layer: string;
+  actual_layer: string;
   mode_correct: boolean;
   intent_correct: boolean;
+  layer_correct: boolean;  // Phase 2.0: 分层准确率
   latency_ms: number;
 }
 
@@ -65,7 +69,9 @@ interface BenchmarkSummary {
     total: number;
     mode_accuracy: string;
     intent_accuracy: string;
+    layer_accuracy: string;  // Phase 2.0: 路由分层准确率
     by_intent: Record<string, { total: number; correct: number; rate: string }>;
+    by_layer: Record<string, { total: number; correct: number; rate: string }>;  // Phase 2.0
     failures: RoutingResult[];
     ci_passed?: boolean;
     ci_threshold_mode?: string;
@@ -162,7 +168,7 @@ async function runRoutingBenchmark(
   const cases: RoutingTestCase[] = JSON.parse(fs.readFileSync(tasksPath, "utf-8"));
   const results: RoutingResult[] = [];
 
-  console.log(`\n=== Routing Benchmark (LLM-Native v4) ===`);
+  console.log(`\n=== Routing Benchmark (LLM-Native v4 + Phase 2.0 Layer 0/1/2) ===`);
   console.log(`Running ${cases.length} test cases via /api/chat/eval/routing...\n`);
 
   for (let i = 0; i < cases.length; i++) {
@@ -190,9 +196,11 @@ async function runRoutingBenchmark(
       const data = await res.json() as any;
       const actualMode = data?.selected_role ?? "unknown";
       const actualIntent = data?.routing_intent ?? "unknown";
+      const actualLayer = data?.routing_layer ?? "L0";
 
       const modeCorrect = actualMode === tc.expected_mode;
       const intentCorrect = actualIntent === tc.expected_intent;
+      const layerCorrect = actualLayer === tc.expected_layer;
 
       results.push({
         input: tc.input,
@@ -200,12 +208,16 @@ async function runRoutingBenchmark(
         actual_mode: actualMode,
         expected_intent: tc.expected_intent,
         actual_intent: actualIntent,
+        expected_layer: tc.expected_layer,
+        actual_layer: actualLayer,
         mode_correct: modeCorrect,
         intent_correct: intentCorrect,
+        layer_correct: layerCorrect,
         latency_ms: Date.now() - start,
       });
 
-      process.stdout.write(modeCorrect && intentCorrect ? "✓" : "✗");
+      const icon = modeCorrect && intentCorrect && layerCorrect ? "✓" : modeCorrect && intentCorrect ? "⚠" : "✗";
+      process.stdout.write(icon);
     } catch (err) {
       results.push({
         input: tc.input,
@@ -213,8 +225,11 @@ async function runRoutingBenchmark(
         actual_mode: "error",
         expected_intent: tc.expected_intent,
         actual_intent: "error",
+        expected_layer: tc.expected_layer,
+        actual_layer: "error",
         mode_correct: false,
         intent_correct: false,
+        layer_correct: false,
         latency_ms: Date.now() - start,
       });
       process.stdout.write("✗");
@@ -227,6 +242,7 @@ async function runRoutingBenchmark(
   const total = results.length;
   const modeCorrect = results.filter((r) => r.mode_correct).length;
   const intentCorrect = results.filter((r) => r.intent_correct).length;
+  const layerCorrect = results.filter((r) => r.layer_correct).length;
 
   // By intent breakdown
   const byIntent: Record<string, { total: number; correct: number; rate: string }> = {};
@@ -245,22 +261,45 @@ async function runRoutingBenchmark(
     item.rate = ((item.correct / item.total) * 100).toFixed(1) + "%";
   }
 
-  const failures = results.filter((r) => !r.mode_correct || !r.intent_correct);
+  // By layer breakdown (Phase 2.0)
+  const byLayer: Record<string, { total: number; correct: number; rate: string }> = {};
+  for (const r of results) {
+    const layer = r.expected_layer;
+    if (!byLayer[layer]) {
+      byLayer[layer] = { total: 0, correct: 0, rate: "0.0%" };
+    }
+    byLayer[layer].total++;
+    if (r.layer_correct) {
+      byLayer[layer].correct++;
+    }
+  }
+  for (const key of Object.keys(byLayer)) {
+    const item = byLayer[key];
+    item.rate = ((item.correct / item.total) * 100).toFixed(1) + "%";
+  }
+
+  const failures = results.filter((r) => !r.mode_correct || !r.intent_correct || !r.layer_correct);
 
   console.log(`总用例: ${total}`);
-  console.log(`路由准确率: ${modeCorrect}/${total} = ${((modeCorrect / total) * 100).toFixed(1)}%`);
-  console.log(`意图准确率: ${intentCorrect}/${total} = ${((intentCorrect / total) * 100).toFixed(1)}%\n`);
+  console.log(`模型准确率: ${modeCorrect}/${total} = ${((modeCorrect / total) * 100).toFixed(1)}%`);
+  console.log(`意图准确率: ${intentCorrect}/${total} = ${((intentCorrect / total) * 100).toFixed(1)}%`);
+  console.log(`分层准确率: ${layerCorrect}/${total} = ${((layerCorrect / total) * 100).toFixed(1)}%\n`);
 
   console.log("按意图分类准确率:");
   for (const [intent, stats] of Object.entries(byIntent)) {
     console.log(`  ${intent.padEnd(15)}: ${stats.correct}/${stats.total} = ${stats.rate}`);
   }
 
+  console.log("\nPhase 2.0 按路由分层准确率:");
+  for (const [layer, stats] of Object.entries(byLayer)) {
+    console.log(`  ${layer.padEnd(4)}: ${stats.correct}/${stats.total} = ${stats.rate}`);
+  }
+
   if (failures.length > 0) {
     console.log(`\n失败用例 (${failures.length}条):`);
     for (const f of failures.slice(0, 10)) {
       console.log(`  [FAIL] "${f.input.slice(0, 40)}..."`);
-      console.log(`         期望 ${f.expected_mode}/${f.expected_intent}, 实际 ${f.actual_mode}/${f.actual_intent}`);
+      console.log(`         期望 ${f.expected_mode}/${f.expected_layer}/${f.expected_intent}, 实际 ${f.actual_mode}/${f.actual_layer}/${f.actual_intent}`);
     }
     if (failures.length > 10) {
       console.log(`  ... 还有 ${failures.length - 10} 条`);
@@ -273,7 +312,9 @@ async function runRoutingBenchmark(
       total,
       mode_accuracy: ((modeCorrect / total) * 100).toFixed(1) + "%",
       intent_accuracy: ((intentCorrect / total) * 100).toFixed(1) + "%",
+      layer_accuracy: ((layerCorrect / total) * 100).toFixed(1) + "%",
       by_intent: byIntent,
+      by_layer: byLayer,
       failures: failures.slice(0, 20),
     },
   };
@@ -469,6 +510,7 @@ async function generateReport(
   if (summary.routing) {
     md += `| 路由准确率 | ${summary.routing.mode_accuracy} | ${rating(summary.routing.mode_accuracy)} |\n`;
     md += `| 意图准确率 | ${summary.routing.intent_accuracy} | ${rating(summary.routing.intent_accuracy)} |\n`;
+    md += `| 分层准确率 | ${summary.routing.layer_accuracy} | ${rating(summary.routing.layer_accuracy)} |\n`;
   }
   if (summary.quality) {
     md += `| 质量规则通过率 | ${summary.quality.rule_pass_rate} | ${rating(summary.quality.rule_pass_rate)} |\n`;
@@ -492,6 +534,22 @@ async function generateReport(
       md += `| ${intent} | ${stats.correct}/${stats.total} | ${stats.rate} |\n`;
     }
 
+    // Phase 2.0: 按路由分层
+    if (summary.routing.by_layer) {
+      md += `
+### 按路由分层（Phase 2.0）
+
+| Layer | 说明 | 正确/总数 | 准确率 |
+|---|---|---|---|
+| L0 | Fast 直接回复（闲聊/简单问答） | — | — |
+| L1 | Fast + web_search（实时数据查询） | — | — |
+| L2 | Slow 模型委托（复杂推理/代码/多步） | — | — |
+`;
+      for (const [layer, stats] of Object.entries(summary.routing.by_layer)) {
+        md += `| ${layer} | — | ${stats.correct}/${stats.total} | ${stats.rate} |\n`;
+      }
+    }
+
     if (summary.routing.failures.length > 0) {
       md += `
 ### 失败用例示例
@@ -501,7 +559,7 @@ async function generateReport(
 `;
       for (const f of summary.routing.failures.slice(0, 10)) {
         const input = f.input.slice(0, 30) + (f.input.length > 30 ? "..." : "");
-        md += `| ${input} | ${f.expected_mode}/${f.expected_intent} | ${f.actual_mode}/${f.actual_intent} |\n`;
+        md += `| ${input} | ${f.expected_mode}/${f.expected_layer}/${f.expected_intent} | ${f.actual_mode}/${f.actual_layer}/${f.actual_intent} |\n`;
       }
     }
   }
@@ -531,6 +589,18 @@ async function generateReport(
     if (weakIntents.length > 0) {
       md += `- 以下 intent 分类准确率偏低，建议优化训练数据: ${weakIntents.join(", ")}\n`;
     }
+    // Phase 2.0: weak layer warning
+    if (summary.routing.by_layer) {
+      const weakLayers = Object.entries(summary.routing.by_layer)
+        .filter(([, s]) => parseFloat(s.rate) < 60)
+        .map(([k]) => k);
+      if (weakLayers.length > 0) {
+        md += `- Phase 2.0 分层准确率偏低: ${weakLayers.join(", ")}，建议检查 Fast 模型 prompt 路由规则\n`;
+      }
+    }
+  }
+  if (summary.routing && parseFloat(summary.routing.layer_accuracy) < 70) {
+    md += `- Phase 2.0 分层准确率偏低，建议优先检查 Fast 模型 prompt 中的 L0/L1/L2 路由规则\n`;
   }
   if (summary.quality && parseFloat(summary.quality.rule_pass_rate) < 85) {
     md += `- 质量评分通过率偏低，建议检查模型输出质量\n`;
@@ -571,31 +641,38 @@ async function main() {
     const timestamp = new Date().toISOString().slice(0, 10);
     writeJson(path.join(resultsDir, `routing-${timestamp}.json`), results);
 
-    // CI Gate: routing mode + intent accuracy
+    // CI Gate: routing mode + intent + layer accuracy
     const modeAcc = parseFloat(routingSummary.mode_accuracy);
     const intentAcc = parseFloat(routingSummary.intent_accuracy);
+    const layerAcc = parseFloat(routingSummary.layer_accuracy);
     const ciPassed = modeAcc >= CI_THRESHOLDS.routing_mode_accuracy
       && intentAcc >= CI_THRESHOLDS.routing_intent_accuracy;
-    summary.routing.ci_passed = ciPassed;
+    // Phase 2.0 CI: layer accuracy >= 50%
+    const ciLayerThreshold = 50;
+    const ciPassedLayer = layerAcc >= ciLayerThreshold;
+    summary.routing.ci_passed = ciPassed && ciPassedLayer;
     summary.routing.ci_threshold_mode = `${CI_THRESHOLDS.routing_mode_accuracy}%`;
     summary.routing.ci_threshold_intent = `${CI_THRESHOLDS.routing_intent_accuracy}%`;
 
     if (args.jsonOut) {
       const ciResult = {
-        ci_passed: ciPassed,
+        ci_passed: ciPassed && ciPassedLayer,
         routing_mode_accuracy: modeAcc,
         routing_intent_accuracy: intentAcc,
+        routing_layer_accuracy: layerAcc,  // Phase 2.0
         threshold_mode: CI_THRESHOLDS.routing_mode_accuracy,
         threshold_intent: CI_THRESHOLDS.routing_intent_accuracy,
+        threshold_layer: ciLayerThreshold,
         commit_hash: summary.commit_hash,
         timestamp: summary.timestamp,
       };
       writeJson(path.join(resultsDir, `ci-gate-routing-${timestamp}.json`), ciResult);
-      console.log(`\n${ciPassed ? "✅ CI GATE PASSED" : "❌ CI GATE FAILED"}`);
+      console.log(`\n${(ciPassed && ciPassedLayer) ? "✅ CI GATE PASSED" : "❌ CI GATE FAILED"}`);
       console.log(`   mode_accuracy:    ${modeAcc.toFixed(1)}% (threshold: ${CI_THRESHOLDS.routing_mode_accuracy}%)`);
       console.log(`   intent_accuracy:  ${intentAcc.toFixed(1)}% (threshold: ${CI_THRESHOLDS.routing_intent_accuracy}%)`);
+      console.log(`   layer_accuracy:   ${layerAcc.toFixed(1)}% (threshold: ${ciLayerThreshold}%)`);
 
-      if (!ciPassed) {
+      if (!(ciPassed && ciPassedLayer)) {
         process.exit(1);
       }
     }

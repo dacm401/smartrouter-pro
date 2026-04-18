@@ -643,6 +643,132 @@ Results: evaluation/results/latest.json
 
 ---
 
+## 第九层：Phase 2.0 SSE 流式验证
+
+### T-22 SSE Fast Reply + Routing Layer（Layer 0 直接回复）
+
+```bash
+curl -s -X POST http://localhost:3001/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "你好", "session_id": "session-sse-01", "stream": true}' \
+  | while IFS= read -r line; do
+    echo "$line" | grep -v "^data: $" | grep "^data:" | sed 's/data: //' | jq -r 'if .type then "\(.type): \(.stream[0:60]) (layer: \(.routing_layer // "n/a"))" else empty end'
+  done
+```
+
+**预期事件流（SSE）：**
+```
+fast_reply: 你好，我是 SmartRouter...  (layer: L0)
+done: [stream_complete]  (layer: L0)
+```
+
+**验收标准：**
+- SSE `fast_reply` 事件包含 `routing_layer: "L0"`（直接回复）
+- SSE `done` 事件包含 `routing_layer`
+
+---
+
+### T-23 SSE Clarifying 流程（Phase 1.5 澄清）
+
+```bash
+curl -s -X POST http://localhost:3001/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "帮我整理一份报告", "session_id": "session-sse-02", "stream": true}' \
+  | while IFS= read -r line; do
+    echo "$line" | grep "^data:" | sed 's/data: //' | jq -r '"\(.type): \(.stream // .question_text // "..." | .[0:80]) (layer: \(.routing_layer // "?"))"'
+  done
+```
+
+**预期事件流：**
+```
+fast_reply: 让我确认一下...
+clarifying: 你想要哪种格式的报告？... (layer: L0)
+done: ...
+```
+
+**验收标准：**
+- SSE `clarifying` 事件有 `question_text` 和可选 `options` 数组
+- `routing_layer` 为 `"L0"`（Fast 直接处理，无需 Slow 委托）
+
+---
+
+### T-24 SSE Slow 委托（Layer 2）
+
+```bash
+curl -s -X POST http://localhost:3001/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "帮我搜索并总结量子计算在2025年的最新进展", "session_id": "session-sse-03", "stream": true}' \
+  | while IFS= read -r line; do
+    echo "$line" | grep "^data:" | sed 's/data: //' | jq -r '"\(.type): \(.stream // "" | .[0:80]) (layer: \(.routing_layer // "?"))"'
+  done
+```
+
+**预期事件流：**
+```
+fast_reply: 好的，这个问题比较深入，让我交给慢模型处理...  (layer: L2)
+status: 任务比较复杂，正在深度分析...  (layer: L2)
+status: 资料已找到，正在整理对比...  (layer: L2)
+result: 慢模型分析完成...  (layer: L2)
+done: [delegation_complete]  (layer: L2)
+```
+
+**验收标准：**
+- 首个 SSE 事件为 `fast_reply`（人格化安抚）
+- 30s 后出现 `status` 事件（安抚消息）
+- Slow 完成前出现 `status` 事件
+- 最终 `result` 事件包含慢模型完整回复
+- 所有事件 `routing_layer` = `"L2"`
+
+---
+
+## 第十层：Phase 2.0 路由分层验证
+
+### T-25 /api/chat/eval/routing 返回 routing_layer
+
+```bash
+# Layer 0: 闲聊
+curl -s -X POST http://localhost:3001/api/chat/eval/routing \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "你好"}' | jq '{routing_layer, selected_role, routing_intent}'
+
+# Layer 1: 实时数据查询
+curl -s -X POST http://localhost:3001/api/chat/eval/routing \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "今天天气怎么样"}' | jq '{routing_layer, selected_role, routing_intent}'
+
+# Layer 2: 复杂推理
+curl -s -X POST http://localhost:3001/api/chat/eval/routing \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: test-user-001" \
+  -d '{"message": "帮我设计一个支持百万并发的分布式缓存系统"}' | jq '{routing_layer, selected_role, routing_intent}'
+```
+
+**验收标准：**
+- Layer 0：`routing_layer: "L0"`, `selected_role: "fast"`, `tool_used: null`
+- Layer 1：`routing_layer: "L1"`, `selected_role: "fast"`, `tool_used: "web_search"`
+- Layer 2：`routing_layer: "L2"`, `selected_role: "slow"`
+
+---
+
+### T-26 Benchmark Layer 分层准确率
+
+```bash
+cd backend
+npm run benchmark -- --suite routing --user-id test-user-001
+```
+
+**验收标准：**
+- 输出包含 `分层准确率: X/Y = Z%`
+- 输出包含 `Phase 2.0 按路由分层准确率` 表（L0/L1/L2 三行）
+- `ci-gate-routing-*.json` 包含 `routing_layer_accuracy` 字段
+
+---
+
 ## 第九层：前端 UI 验证
 
 打开 `http://localhost:3000`，按顺序操作：
@@ -851,6 +977,27 @@ Write-Host "结果: $pass 通过 / $fail 失败"
 | `evidence` 返回空 | 无 web_search 流量 | Evidence 主要由 web_search 工具自动写入 |
 
 ---
+
+### T-27 路由分层标识（前端 UI）
+
+打开前端 `http://localhost:3000`，发送不同类型的消息，观察右上角或消息气泡旁的 **routing_layer badge**：
+
+```bash
+# 前端 UI 验证命令（无 curl，直接用浏览器手动操作）
+# 步骤：
+# 1. 打开 http://localhost:3000
+# 2. 发送 "你好" → 期望出现灰色 L0 badge
+# 3. 发送 "今天沪深300涨了多少" → 期望出现蓝色 L1 badge
+# 4. 发送 "帮我分析一下为什么最近科技股跌了" → 期望出现紫色 L2 badge
+```
+
+| 消息示例 | 期望 routing_layer | Badge 颜色 | 验证 |
+|----------|-------------------|-----------|------|
+| "你好"、"谢谢" | L0 | 灰色 | 快速回复，无 loading |
+| "今天天气"、"查下茅台股价" | L1 | 蓝色 | 有 loading，显示实时数据 |
+| "帮我分析投资策略"、"写个报告" | L2 | 紫色 | 长时间 loading，Slow 模型 |
+
+**注意**：如 badge 未显示，检查 `src/components/ChatMessage.tsx` 是否渲染了 SSE 事件中的 `routing_layer` 字段。
 
 ## 附录：前端 Tab 速查
 
