@@ -174,7 +174,7 @@ curl -s -X POST http://localhost:3001/api/chat/eval/routing \
 
 - Phase 1.5 Clarifying 流程 UX（前端弹窗）尚未完全集成
 - Layer 3 Execute 模式为预留接口，未完整实现前端触发
-- Benchmark 测试用例尚未覆盖 L0/L1/L2 各 10 条
+- Benchmark 测试用例尚未覆盖 L0/L1/L2 各 10 条 ~~（Sprint 34: ✅ L0:20 / L1:10 / L2:36）~~ ✅ 已完成 L1 扩测（2026-04-18）
 
 ---
 

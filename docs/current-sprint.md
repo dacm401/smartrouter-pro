@@ -1,18 +1,18 @@
 # Current Sprint
 
-**Sprint 33 — Phase 2.0 流量分级上线**
-**Status:** ✅ Completed — 2026-04-18
+**Sprint 34 — L1 Benchmark 扩测 + 路由规则调优**
+**Status:** 🔄 In Progress — 2026-04-18
 
 ---
 
 ## Task Cards
 
-| Task Card | Description | Status | Commit |
-|---|---|---|---|
-| P2E-1 | Phase 2.0 SSE chunk 事件补 routing_layer | ✅ Done | — |
-| P2E-2 | docs/PHASE-2-ROUTING-PLAN.md | ✅ Done | — |
-| P2E-3 | current-sprint.md 更新为 Sprint 33 | ✅ Done | — |
-| P2E-4 | tsc --noEmit + push | 🔄 In Progress | — |
+| Task Card | Description | Status |
+|---|---|---|
+| S34-1 | 补齐 L1 路由 benchmark 用例（L0:20 / L1:10 / L2:36） | ✅ Done |
+| S34-2 | tsc --noEmit 验证（0 errors） | ✅ Done |
+| S34-3 | current-sprint.md 更新为 Sprint 34 | ✅ Done |
+| S34-4 | Benchmark CI 验证（L1 层准确率分析） | ⏳ Pending（需服务器） |
 
 ---
 

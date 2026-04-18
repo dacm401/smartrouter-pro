@@ -411,5 +411,54 @@
     "expected_layer": "L0",
     "expected_intent": "translation",
     "reason": "边界case: 简单句子 → Layer 0 直接回复"
+  },
+  {
+    "input": "腾讯今天的股价",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "chat",
+    "reason": "实时股价查询 → Layer 1 web_search"
+  },
+  {
+    "input": "今天有什么重要新闻",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "chat",
+    "reason": "实时新闻查询 → Layer 1 web_search"
+  },
+  {
+    "input": "昨晚的足球比赛结果",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "chat",
+    "reason": "实时体育比分 → Layer 1 web_search"
+  },
+  {
+    "input": "现在美元兑人民币汇率",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "simple_qa",
+    "reason": "实时汇率查询 → Layer 1 web_search"
+  },
+  {
+    "input": "苹果公司最新财报",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "chat",
+    "reason": "实时财经数据 → Layer 1 web_search"
+  },
+  {
+    "input": "黄金当前价格",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "simple_qa",
+    "reason": "实时大宗商品价格 → Layer 1 web_search"
+  },
+  {
+    "input": "NBA最新比分",
+    "expected_mode": "fast",
+    "expected_layer": "L1",
+    "expected_intent": "chat",
+    "reason": "实时体育比分 → Layer 1 web_search"
   }
 ]
