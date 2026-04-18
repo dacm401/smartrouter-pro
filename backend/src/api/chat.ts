@@ -514,7 +514,7 @@ chatRouter.post("/chat", async (c) => {
           try {
             for await (const chunk of callModelStream(orchSelectedModel, contextResult.final_messages, reqApiKey)) {
               fullContent += chunk;
-              await s.write(`data: ${JSON.stringify({ type: "chunk", stream: chunk })}\n\n`);
+              await s.write(`data: ${JSON.stringify({ type: "chunk", stream: chunk, routing_layer: routingLayer })}\n\n`);
             }
           } catch (streamErr: any) {
             console.error("[stream] Model stream error:", streamErr.message);
