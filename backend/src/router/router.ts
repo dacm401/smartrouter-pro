@@ -1,46 +1,29 @@
-import type { ChatRequest, InputFeatures, RoutingDecision } from "../types/index.js";
-import { analyzeIntent, analyzeIntentWithLLM, hasCode, hasMath } from "./intent-analyzer.js";
-import { scoreComplexity } from "./complexity-scorer.js";
-import { ruleRoute } from "./rule-router.js";
-import { MemoryRepo } from "../db/repositories.js";
+import type { ChatRequest, InputFeatures } from "../types/index.js";
 import { countTokens } from "../models/token-counter.js";
-import { config } from "../config.js";
 
-export async function analyzeAndRoute(request: ChatRequest): Promise<{ features: InputFeatures; routing: RoutingDecision }> {
-  const { message, history = [], user_id } = request;
-
-  // SP28-A: 优先使用 LLM-based intent classifier，失败时降级到正则
-  let intent: ReturnType<typeof analyzeIntent> = "unknown";
-  try {
-    intent = await analyzeIntentWithLLM(
-      message,
-      config.openaiApiKey,
-      config.openaiBaseUrl || "https://api.openai.com/v1",
-      config.fastModel
-    );
-  } catch {
-    // LLM 失败，降级到正则
-    intent = analyzeIntent(message);
-  }
+export async function analyzeAndRoute(request: ChatRequest): Promise<{ features: InputFeatures }> {
+  const { message, history = [] } = request;
 
   const tokenCount = countTokens(message);
   const contextTokens = history.reduce((sum, m) => sum + countTokens(m.content), 0);
-  const { score: complexityScore } = scoreComplexity(message, intent, history ?? []);
 
+  // LLM-native routing: the model self-judges via system prompt (see orchestrator.ts)
+  // This module provides lightweight feature extraction for any downstream use.
   const features: InputFeatures = {
-    raw_query: message, token_count: tokenCount, intent, complexity_score: complexityScore,
-    has_code: hasCode(message), has_math: hasMath(message), requires_reasoning: complexityScore > 60,
-    conversation_depth: history.filter((m) => m.role === "user").length, context_token_count: contextTokens,
+    raw_query: message,
+    token_count: tokenCount,
+    context_token_count: contextTokens,
+    conversation_depth: history.filter((m) => m.role === "user").length,
     language: detectLanguage(message),
+    // Legacy fields kept for type compatibility; no longer used by routing logic
+    intent: "general",
+    complexity_score: 50,
+    has_code: false,
+    has_math: false,
+    requires_reasoning: false,
   };
 
-  const [identity, behaviors] = await Promise.all([
-    MemoryRepo.getIdentity(user_id),
-    MemoryRepo.getBehavioralMemories(user_id),
-  ]);
-
-  const routing = ruleRoute(features, identity, behaviors);
-  return { features, routing };
+  return { features };
 }
 
 function detectLanguage(text: string): string {

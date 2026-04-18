@@ -8,7 +8,6 @@ const VALID_FEEDBACK_TYPES: readonly FeedbackType[] = [
   "thumbs_up", "thumbs_down",
   "follow_up_doubt", "follow_up_thanks",
 ] as const;
-import { analyzeAndRoute } from "../router/router.js";
 import { manageContext } from "../services/context-manager.js";
 import { callModelFull, callModelStream } from "../models/model-gateway.js";
 import { callOpenAIWithOptions } from "../models/providers/openai.js";
@@ -27,10 +26,12 @@ import { formatExecutionResultsForPlanner } from "../services/execution-result-f
 // EL-003: Execution Loop
 import { taskPlanner } from "../services/task-planner.js";
 import { executionLoop } from "../services/execution-loop.js";
+// O-008: Weather search
+import { detectWeatherQuery, fetchRealTimeWeather, formatWeatherPrompt } from "../services/weather-search.js";
 // C3a: unified identity
 import { getContextUserId } from "../middleware/identity.js";
 // O-001: Orchestrator — 快模型先回复 + 委托慢模型后台执行
-import { orchestrator, getDelegationResult } from "../services/orchestrator.js";
+import { orchestrator, getDelegationResult, pollArchiveAndYield } from "../services/orchestrator.js";
 // O-007: 安抚功能 — 检测 pending 任务
 import { DelegationArchiveRepo } from "../db/repositories.js";
 
@@ -141,8 +142,6 @@ chatRouter.post("/chat", async (c) => {
 
       const orchResult = await orchestrator({
         message: body.message ?? "",
-        intent: features.intent,
-        complexity_score: features.complexity_score,
         language: features.language as "zh" | "en",
         user_id: userId,
         session_id: sessionId,
@@ -383,55 +382,36 @@ chatRouter.post("/chat", async (c) => {
     if (body.stream === true) {
       const taskId = resumedTaskId || uuid();
       const message = body.message ?? "";
-      const intentToMode: Record<string, string> = { simple_qa: "direct", chat: "direct", unknown: "direct" };
-      const mode = intentToMode[features.intent] || "research";
-      const complexityMap = ["low", "low", "medium", "high"];
-      const complexity = complexityMap[Math.min(Math.floor(features.complexity_score / 33), 3)];
-      const title = message.substring(0, 100);
 
-      // Fire-and-forget task creation (don't block stream)
-      TaskRepo.create({
-        id: taskId, user_id: userId, session_id: sessionId,
-        title, mode, complexity, risk: "low", goal: title,
-      }).catch((e) => console.error("[stream] Failed to create task:", e));
-
-      // Build prompt + context (same as non-stream path)
-      const memories = config.memory.enabled
-        ? await MemoryEntryRepo.getTopForUser(userId, config.memory.maxEntriesToInject)
-        : [];
-      const retrievalResults = memories.map((m) => ({ entry: m, score: m.importance, reason: "v1" }));
-
-      let taskSummary: { goal: string; summaryText: string; nextStep: string | null } | undefined;
-      if (resumedTaskSummary) {
-        const s = resumedTaskSummary;
-        const parts: string[] = [];
-        if (s.completed_steps?.length) parts.push(`已完成步骤:\n${s.completed_steps.join("\n")}`);
-        if (s.blocked_by?.length) parts.push(`卡点: ${s.blocked_by.join(", ")}`);
-        if (s.confirmed_facts?.length) parts.push(`已确认事实:\n${s.confirmed_facts.map((f: string) => `• ${f}`).join("\n")}`);
-        if (s.summary_text) parts.push(`任务摘要: ${s.summary_text}`);
-        taskSummary = { goal: s.goal || "继续任务", summaryText: parts.join("\n\n") || "(无详细摘要)", nextStep: s.next_step ?? null };
-      } else if (retrievalResults.length > 0) {
-        const { buildCategoryAwareMemoryText } = await import("../services/memory-retrieval.js");
-        taskSummary = { goal: "User memories:", summaryText: buildCategoryAwareMemoryText(retrievalResults as any).combined, nextStep: null };
+      // O-007: 检测 pending 慢任务
+      let hasPendingTask = false;
+      let pendingTaskMessage: string | undefined;
+      try {
+        hasPendingTask = await DelegationArchiveRepo.hasPending(userId, sessionId);
+        if (hasPendingTask) {
+          const pendingTasks = await DelegationArchiveRepo.getPendingBySession(userId, sessionId);
+          if (pendingTasks.length > 0) {
+            pendingTaskMessage = pendingTasks[0].original_message;
+          }
+        }
+      } catch (e) {
+        console.warn("[stream] Failed to check pending delegation:", e);
       }
 
-      const { assemblePrompt } = await import("../services/prompt-assembler.js");
-      const promptAssembly = assemblePrompt({
-        mode: mode as any,
-        modelMode: routing.selected_role as "fast" | "slow",
-        intent: features.intent,
-        userMessage: message,
-        memoryText: retrievalResults.length > 0 ? buildCategoryAwareMemoryText(retrievalResults as any).combined : undefined,
-        taskSummary,
-        maxTaskSummaryTokens: config.memory.maxEntriesToInject * config.memory.maxTokensPerEntry,
-        lang: features.language as "zh" | "en",
+      // 调用 orchestrator（与普通路径一致）
+      const orchResult = await orchestrator({
+        message,
+        language: features.language as "zh" | "en",
+        user_id: userId,
+        session_id: sessionId,
+        history: body.history ?? [],
+        reqApiKey,
+        hasPendingTask,
+        pendingTaskMessage,
       });
 
-      const contextResult = await manageContext(
-        { ...body, user_id: userId, session_id: sessionId },
-        routing.selected_model,
-        promptAssembly.systemPrompt
-      );
+      const orchSelectedRole: "fast" | "slow" = orchResult.delegation ? "slow" : "fast";
+      const orchSelectedModel = orchSelectedRole === "slow" ? config.slowModel : config.fastModel;
 
       // Set SSE headers
       c.header("Content-Type", "text/event-stream");
@@ -440,60 +420,127 @@ chatRouter.post("/chat", async (c) => {
       c.header("X-Accel-Buffering", "no");
 
       return stream(c, async (s) => {
-        let fullContent = "";
-        const streamStartTime = Date.now();
-
-        try {
-          for await (const chunk of callModelStream(routing.selected_model, contextResult.final_messages, reqApiKey)) {
-            fullContent += chunk;
-            await s.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
-          }
-        } catch (streamErr: any) {
-          console.error("[stream] Model stream error:", streamErr.message);
-          await s.write(`data: ${JSON.stringify({ type: "error", message: streamErr.message })}\n\n`);
-          return;
+        // Step 1: 立即推送 fast_reply（安抚消息或 Fast 直接回复）
+        if (orchResult.fast_reply) {
+          await s.write(`data: ${JSON.stringify({ type: "fast_reply", content: orchResult.fast_reply })}\n\n`);
         }
 
-        // Build decision object for done event
-        const streamLatency = Date.now() - streamStartTime;
-        const { estimateCost } = await import("../models/token-counter.js");
-        const roughTokens = Math.ceil(fullContent.length / 4);
-        const totalCost = estimateCost(contextResult.original_tokens, roughTokens, routing.selected_model);
-
-        const decision: DecisionRecord = {
-          id: uuid(), user_id: userId, session_id: sessionId, timestamp: startTime,
-          input_features: features, routing, context: contextResult,
-          execution: {
-            model_used: routing.selected_model,
-            input_tokens: contextResult.original_tokens,
-            output_tokens: roughTokens,
-            total_cost_usd: totalCost,
-            latency_ms: streamLatency,
-            did_fallback: false,
-            response_text: "",
-          },
-        };
-
-        await s.write(`data: ${JSON.stringify({ type: "done", task_id: taskId, decision: { intent: features.intent, selected_model: routing.selected_model, selected_role: routing.selected_role, confidence: routing.confidence } })}\n\n`);
-
-        // Fire-and-forget post-stream work
-        const { logDecision } = await import("../logging/decision-logger.js");
-        logDecision({ ...decision, execution: { ...decision.execution, response_text: fullContent } }).catch((e) => console.error("[stream] logDecision failed:", e));
-
-        const previousDecisionId: string | undefined = (() => {
-          for (let i = (body.history?.length ?? 0) - 1; i >= 0; i--) {
-            const msg = body.history![i];
-            if (msg.role === "assistant" && msg.decision_id) return msg.decision_id;
+        // Step 2: 如果有委托，启动轮询 loop 推送结果
+        if (orchResult.delegation) {
+          try {
+            for await (const event of pollArchiveAndYield(orchResult.delegation.task_id, features.language as "zh" | "en")) {
+              await s.write(`data: ${JSON.stringify({ type: event.type, content: event.stream })}\n\n`);
+            }
+          } catch (e: any) {
+            console.error("[stream] pollArchiveAndYield error:", e.message);
+            await s.write(`data: ${JSON.stringify({ type: "error", message: "轮询出错" })}\n\n`);
           }
-          return undefined;
-        })();
+        } else {
+          // Step 3: Fast 直接回复 → 流式输出（复用原有 streaming 逻辑）
+          const memories = config.memory.enabled
+            ? await MemoryEntryRepo.getTopForUser(userId, config.memory.maxEntriesToInject)
+            : [];
+          const retrievalResults = memories.map((m) => ({ entry: m, score: m.importance, reason: "v1" }));
 
-        learnFromInteraction({ ...decision, execution: { ...decision.execution, response_text: fullContent } }, message, previousDecisionId, userId)
-          .catch((e) => console.error("[stream] learnFromInteraction failed:", e));
-        TaskRepo.updateExecution(taskId, contextResult.original_tokens + roughTokens)
-          .catch((e) => console.error("[stream] updateExecution failed:", e));
-        TaskRepo.createTrace({ id: uuid(), task_id: taskId, type: "response", detail: { input_tokens: contextResult.original_tokens, output_tokens: roughTokens, latency_ms: streamLatency, streaming: true } })
-          .catch((e) => console.error("[stream] createTrace failed:", e));
+          let taskSummary: { goal: string; summaryText: string; nextStep: string | null } | undefined;
+          if (resumedTaskSummary) {
+            const ss = resumedTaskSummary;
+            const parts: string[] = [];
+            if (ss.completed_steps?.length) parts.push(`已完成步骤:\n${ss.completed_steps.join("\n")}`);
+            if (ss.blocked_by?.length) parts.push(`卡点: ${ss.blocked_by.join(", ")}`);
+            if (ss.confirmed_facts?.length) parts.push(`已确认事实:\n${ss.confirmed_facts.map((f: string) => `• ${f}`).join("\n")}`);
+            if (ss.summary_text) parts.push(`任务摘要: ${ss.summary_text}`);
+            taskSummary = { goal: ss.goal || "继续任务", summaryText: parts.join("\n\n") || "(无详细摘要)", nextStep: ss.next_step ?? null };
+          } else if (retrievalResults.length > 0) {
+            const { buildCategoryAwareMemoryText } = await import("../services/memory-retrieval.js");
+            taskSummary = { goal: "User memories:", summaryText: buildCategoryAwareMemoryText(retrievalResults as any).combined, nextStep: null };
+          }
+
+          const { assemblePrompt } = await import("../services/prompt-assembler.js");
+          const intentToMode: Record<string, string> = { simple_qa: "direct", chat: "direct", unknown: "direct" };
+          const mode = intentToMode[features.intent] || "research";
+          const promptAssembly = assemblePrompt({
+            mode: mode as any,
+            modelMode: orchSelectedRole,
+            intent: features.intent,
+            userMessage: message,
+            memoryText: retrievalResults.length > 0 ? buildCategoryAwareMemoryText(retrievalResults as any).combined : undefined,
+            taskSummary,
+            maxTaskSummaryTokens: config.memory.maxEntriesToInject * config.memory.maxTokensPerEntry,
+            lang: features.language as "zh" | "en",
+          });
+
+          const contextResult = await manageContext(
+            { ...body, user_id: userId, session_id: sessionId },
+            orchSelectedModel,
+            promptAssembly.systemPrompt
+          );
+
+          // 天气查询注入
+          const weatherCity = detectWeatherQuery(message);
+          if (weatherCity) {
+            const weatherData = await fetchRealTimeWeather(weatherCity);
+            if (weatherData) {
+              const weatherMsg: ChatMessage = {
+                role: "user",
+                content: `【实时天气查询】用户问的是："${message}"\n\n${formatWeatherPrompt(weatherData, message)}`,
+              };
+              const lastUserIdx = [...contextResult.final_messages].reverse().findIndex((m: ChatMessage) => m.role === "user");
+              const insertIdx = lastUserIdx >= 0 ? contextResult.final_messages.length - 1 - lastUserIdx : contextResult.final_messages.length - 1;
+              contextResult.final_messages.splice(insertIdx, 0, weatherMsg);
+            }
+          }
+
+          let fullContent = "";
+          const streamStartTime = Date.now();
+
+          try {
+            for await (const chunk of callModelStream(orchSelectedModel, contextResult.final_messages, reqApiKey)) {
+              fullContent += chunk;
+              await s.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
+            }
+          } catch (streamErr: any) {
+            console.error("[stream] Model stream error:", streamErr.message);
+            await s.write(`data: ${JSON.stringify({ type: "error", message: streamErr.message })}\n\n`);
+            return;
+          }
+
+          const streamLatency = Date.now() - streamStartTime;
+          const roughTokens = Math.ceil(fullContent.length / 4);
+
+          await s.write(`data: ${JSON.stringify({
+            type: "done",
+            task_id: taskId,
+            decision: {
+              intent: features.intent,
+              selected_model: orchSelectedModel,
+              selected_role: orchSelectedRole,
+              confidence: 1.0
+            }
+          })}\n\n`);
+
+          // Fire-and-forget
+          const { estimateCost } = await import("../models/token-counter.js");
+          const totalCost = estimateCost(contextResult.original_tokens, roughTokens, orchSelectedModel);
+          const { logDecision } = await import("../logging/decision-logger.js");
+          logDecision({
+            id: uuid(), user_id: userId, session_id: sessionId, timestamp: startTime,
+            input_features: features,
+            routing: { router_version: "orchestrator_v0.4", scores: { fast: 1, slow: 0 }, confidence: 1, selected_model: orchSelectedModel, selected_role: orchSelectedRole, selection_reason: "orchestrator", fallback_model: "" },
+            context: { original_tokens: contextResult.original_tokens, compressed_tokens: contextResult.compressed_tokens, compression_level: contextResult.compression_level, compression_ratio: contextResult.compression_ratio, memory_items_retrieved: retrievalResults.length, final_messages: contextResult.final_messages, compression_details: contextResult.compression_details },
+            execution: { model_used: orchSelectedModel, input_tokens: contextResult.original_tokens, output_tokens: roughTokens, total_cost_usd: totalCost, latency_ms: streamLatency, did_fallback: false, response_text: fullContent },
+          }).catch((e) => console.error("[stream] logDecision failed:", e));
+
+          learnFromInteraction({
+            id: uuid(), user_id: userId, session_id: sessionId, timestamp: startTime,
+            input_features: features,
+            routing: { router_version: "orchestrator_v0.4", scores: { fast: 1, slow: 0 }, confidence: 1, selected_model: orchSelectedModel, selected_role: orchSelectedRole, selection_reason: "orchestrator", fallback_model: "" },
+            context: { original_tokens: contextResult.original_tokens, compressed_tokens: 0, compression_level: "L0", compression_ratio: 1, memory_items_retrieved: 0, final_messages: [], compression_details: [] },
+            execution: { model_used: orchSelectedModel, input_tokens: contextResult.original_tokens, output_tokens: roughTokens, total_cost_usd: totalCost, latency_ms: streamLatency, did_fallback: false, response_text: fullContent },
+          } as any, message, undefined, userId).catch((e) => console.error("[stream] learnFromInteraction failed:", e));
+
+          TaskRepo.updateExecution(taskId, contextResult.original_tokens + roughTokens).catch((e) => console.error("[stream] updateExecution failed:", e));
+        }
       });
     }
     // ── End S1 streaming mode ─────────────────────────────────────────────
