@@ -441,8 +441,10 @@ chatRouter.post("/chat", async (c) => {
             }
           } catch (e: any) {
             console.error("[stream] pollArchiveAndYield error:", e.message);
-            await s.write(`data: ${JSON.stringify({ type: "error", message: "轮询出错" })}\n\n`);
+            await s.write(`data: ${JSON.stringify({ type: "error", stream: "轮询出错" })}\n\n`);
           }
+          // SSE done 事件
+          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[delegation_complete]" })}\n\n`);
         } else {
           // Step 3: Fast 直接回复 → 流式输出（复用原有 streaming 逻辑）
           const memories = config.memory.enabled
@@ -548,6 +550,9 @@ chatRouter.post("/chat", async (c) => {
           } as any, message, undefined, userId).catch((e) => console.error("[stream] learnFromInteraction failed:", e));
 
           TaskRepo.updateExecution(taskId, contextResult.original_tokens + roughTokens).catch((e) => console.error("[stream] updateExecution failed:", e));
+
+          // Product polish: SSE done 事件，告知前端流结束
+          await s.write(`data: ${JSON.stringify({ type: "done", stream: "[stream_complete]", tokens: roughTokens, latency_ms: streamLatency })}\n\n`);
         }
       });
     }

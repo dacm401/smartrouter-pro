@@ -593,8 +593,11 @@ async function triggerSlowModelBackground(input: SlowModelBackgroundInput): Prom
 // ── SSE 轮询 loop（含用户体验安抚）───────────────────────────────────────────
 
 export interface SSEEvent {
-  type: "status" | "result" | "error";
+  type: "status" | "result" | "error" | "done" | "chunk" | "fast_reply";
   stream: string;
+  /** Phase 1.5: Clarifying 事件可选字段 */
+  options?: string[];
+  question_id?: string;
 }
 
 /**
