@@ -127,6 +127,8 @@ export interface ChatRequest {
   task_id?: string;
   /** S1: If true, return SSE stream instead of a single JSON response. */
   stream?: boolean;
+  /** Phase 3.0: If true, use LLM-Native Manager-Worker routing instead of orchestrator. */
+  use_llm_native_routing?: boolean;
 }
 
 export interface ChatResponse {
@@ -143,6 +145,8 @@ export interface ChatResponse {
     task_id: string;
     status: "triggered";
   };
+  /** Phase 3.0: Clarifying info — present when Manager requests user clarification. */
+  clarifying?: ClarifyQuestion;
 }
 
 export interface IdentityMemory {

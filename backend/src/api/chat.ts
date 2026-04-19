@@ -33,6 +33,8 @@ import { detectWeatherQuery, fetchRealTimeWeather, formatWeatherPrompt } from ".
 import { getContextUserId } from "../middleware/identity.js";
 // O-001: Orchestrator — 快模型先回复 + 委托慢模型后台执行
 import { orchestrator, getDelegationResult, pollArchiveAndYield, evaluateRouting, inferRoutingLayer } from "../services/orchestrator.js";
+// Phase 3.0: LLM-Native Router — ManagerDecision 驱动的路由
+import { routeWithManagerDecision } from "../services/llm-native-router.js";
 // O-007: 安抚功能 — 检测 pending 任务
 import { DelegationArchiveRepo } from "../db/repositories.js";
 
@@ -242,6 +244,113 @@ chatRouter.post("/chat", async (c) => {
       return c.json(response);
     }
     // ── End O-001 Orchestrator 分支 ─────────────────────────────────────────────
+
+    // ── Phase 3.0: LLM-Native Manager-Worker 路由分支 ────────────────────────────
+    // 触发条件：body.use_llm_native_routing === true
+    // 路径：Fast Manager → ManagerDecision JSON → 路由分发
+    // Phase 1：双轨并行，不影响现有 orchestrator 链路
+    if (body.use_llm_native_routing === true) {
+      let llmNativeResult;
+      try {
+        llmNativeResult = await routeWithManagerDecision({
+          message: body.message ?? "",
+          user_id: userId,
+          session_id: sessionId,
+          history: body.history ?? [],
+          language: features.language as "zh" | "en",
+          reqApiKey,
+        });
+      } catch (e: any) {
+        // Manager 模型调用失败 → fallback 到旧 orchestrator
+        console.warn("[chat] llm-native-router failed, fallback to orchestrator:", e.message);
+        llmNativeResult = null;
+      }
+
+      if (llmNativeResult) {
+        const taskId = llmNativeResult.delegation?.task_id || uuid();
+
+        // 记录 decision log（Phase 3.0 扩展）
+        await logDecision({
+          id: uuid(),
+          user_id: userId,
+          session_id: sessionId,
+          timestamp: startTime,
+          input_features: features,
+          routing: {
+            ...routing,
+            selected_model: config.fastModel,
+            selected_role: "fast",
+            selection_reason: `llm_native: ${llmNativeResult.decision_type ?? "unknown"}`,
+          },
+          context: {
+            original_tokens: 0,
+            compressed_tokens: 0,
+            compression_level: "L0",
+            compression_ratio: 0,
+            memory_items_retrieved: 0,
+            final_messages: [],
+            compression_details: [],
+          },
+          execution: {
+            model_used: config.fastModel,
+            input_tokens: 0,
+            output_tokens: 0,
+            total_cost_usd: 0,
+            latency_ms: Date.now() - startTime,
+            did_fallback: false,
+            response_text: llmNativeResult.message,
+          },
+        }).catch((e) => console.error("Failed to log llm-native decision:", e));
+
+        const response: ChatResponse = {
+          message: llmNativeResult.message,
+          decision: {
+            id: uuid(),
+            user_id: userId,
+            session_id: sessionId,
+            timestamp: startTime,
+            input_features: features,
+            routing: {
+              router_version: "manager_decision_v1",
+              scores: { fast: 1.0, slow: 0 },
+              confidence: llmNativeResult.decision?.confidence ?? 1.0,
+              selected_model: config.fastModel,
+              selected_role: "fast",
+              selection_reason: `llm_native(${llmNativeResult.decision_type ?? "unknown"}): ${llmNativeResult.decision?.reason ?? ""}`,
+              fallback_model: config.slowModel,
+              routing_layer: llmNativeResult.routing_layer,
+            },
+            context: {
+              original_tokens: 0,
+              compressed_tokens: 0,
+              compression_level: "L0",
+              compression_ratio: 0,
+              memory_items_retrieved: 0,
+              final_messages: [],
+              compression_details: [],
+            },
+            execution: {
+              model_used: config.fastModel,
+              input_tokens: 0,
+              output_tokens: 0,
+              total_cost_usd: 0,
+              latency_ms: Date.now() - startTime,
+              did_fallback: false,
+              response_text: llmNativeResult.message,
+            },
+          },
+          task_id: taskId,
+          // Phase 3.0: 扩展 delegation 字段，包含 decision_type
+          delegation: llmNativeResult.delegation,
+          // Phase 3.0: 澄清字段
+          clarifying: llmNativeResult.clarifying,
+        };
+
+        return c.json(response);
+      }
+      // fallback：llmNativeResult 为 null（解析失败），继续走旧逻辑
+    }
+    // ── End Phase 3.0 LLM-Native 路由分支 ────────────────────────────────────────
 
     // 如果请求级有指定模型，替换路由结果里的模型名
     if (body.fast_model || body.slow_model) {
