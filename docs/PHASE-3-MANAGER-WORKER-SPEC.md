@@ -1,6 +1,6 @@
 # SmartRouter Pro — Phase 3.0 Manager-Worker Runtime 架构规范
 
-> 版本：v1.0 | 日期：2026-04-19 | 状态：**PROPOSED**
+> 版本：v1.1 | 日期：2026-04-19 | 状态：**IN DEVELOPMENT — Sprint 38 Phase 3 ✅ | Sprint 38 Phase 4 ✅**
 > 基于：用户架构判断 + SYSTEM-STATUS-REPORT + ROADMAP-2026Q2
 > 关联文档：`LLM-NATIVE-ROUTING-SPEC.md`（Phase 0~5 详细实施）
 
@@ -372,7 +372,7 @@ CREATE TABLE task_archives (
 
 ---
 
-### Phase 3：Fast 回收最终表达权
+### Phase 3：Fast 回收最终表达权 ✅ Sprint 38 Phase 3 DONE
 
 **目标**：
 - worker 输出只给 manager
@@ -401,15 +401,22 @@ interface SSEEvent {
 
 ---
 
-### Phase 4：废弃旧 router 三件套
+### Phase 4：废弃旧 router 三件套 ✅ DONE
 
-**时机**：Phase 1~3 稳定运行后，再逐步废弃：
+**已确认废弃（历史清理，Sprint 30 前后）**：
 
-- `rule-router.ts`
-- `complexity-scorer.ts`
-- `intent-analyzer.ts`
+| 文件 | 状态 |
+|------|------|
+| `rule-router.ts` | ✅ 已删除 |
+| `complexity-scorer.ts` | ✅ 已删除 |
+| `intent-analyzer.ts` | ✅ 已删除 |
 
-**永远保留 fallback 路径**：旧逻辑降级为"无法解析时的兜底路由"。
+**现状**：
+- `router/router.ts` → 保留学名兼容性，作为 lightweight feature extractor（只提取 token count / language）
+- `router/quality-gate.ts` → 保留，快模型质检兜底
+- Fallback 路径：`llm-native-router` 失败 → `orchestrator` 兜底 → `getDefaultRouting` 最终兜底
+
+**双轨**：Phase 3.0 (`use_llm_native_routing=true`) 优先，旧 orchestrator 作为 fallback，两路并存直到 Phase 3 稳定。
 
 ---
 
