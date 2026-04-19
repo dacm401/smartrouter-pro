@@ -279,20 +279,25 @@ O-007 安抚功能依赖 `DelegationArchiveRepo.hasPending()`，但 delegation_a
 
 ## 当前 Sprint 内已识别待修复的 Bug
 
-| Bug ID | 描述 | 影响 | 优先级 |
-|--------|------|------|--------|
-| **B39-01** | llm-native-router delegate_to_slow 同时调用 TaskCommandRepo + triggerSlowModelBackground，双写 delegation_archive | 数据不一致 | 🔴 P0 |
-| **B39-02** | ask_clarification 不写 task_archives，无法追踪 ClarifyQuestion 后续状态 | 状态不可追踪 | 🔴 P0 |
-| **B39-03** | slow-worker-loop 写 `state=done`，但 pollArchiveAndYield 读 `status=done` | Worker 结果推送失败 | 🔴 P0 |
-| **B39-04** | execute-worker-loop hardcode 模型名，非从 config 读取 | 配置失效 | 🟡 P1 |
-| **B39-05** | SSE done 事件两路语义不一致（旧 SSE 三种 done，Phase 3.0 一种） | 前端需区分处理 | 🟡 P1 |
-| **B39-06** | fast_observations 方法无调用方，死代码 | 技术债务 | 🟡 P2 |
+| Bug ID | 描述 | 影响 | 优先级 | 状态 |
+|--------|------|------|--------|------|
+| **B39-01** | llm-native-router delegate_to_slow 同时调用 TaskCommandRepo + triggerSlowModelBackground，双写 delegation_archive | 数据不一致 | 🔴 P0 | ✅ **已修复** (`2975282`) |
+| **B39-02** | ask_clarification 不写 task_archives，无法追踪 ClarifyQuestion 后续状态 | 状态不可追踪 | 🔴 P0 | ✅ **已修复** (`2975282`) |
+| **B39-03** | slow-worker-loop 写 `state=done`，但 pollArchiveAndYield 读 `status=done` | Worker 结果推送失败 | 🔴 P0 | ✅ **已修复** (`2975282`) |
+| **B39-04** | execute-worker-loop hardcode 模型名，非从 config 读取 | 配置失效 | 🟡 P1 | 🔲 待处理 |
+| **B39-05** | SSE done 事件两路语义不一致（旧 SSE 三种 done，Phase 3.0 一种） | 前端需区分处理 | 🟡 P1 | 🔲 Card 39-C |
+| **B39-06** | fast_observations 方法无调用方，死代码 | 技术债务 | 🟡 P2 | 🔲 待处理 |
 
 ---
 
-## 下一步：Card 39-A 修复（B39-01 / B39-02 / B39-03）
+## 下一步：Card 39-B → Card 39-C → Card 39-D → Card 39-E
 
-准备开始 Sprint 39 Card 39-A：修复权威数据源双写 + 状态语义不一致。
+Card 39-A（B39-01/02/03）✅ 已完成。后续 Sprint 39 五步收口：
+
+- **Card 39-B**：状态机语义统一（state vs. status 双轨合并）
+- **Card 39-C**：SSE 协议冻结（统一 done 语义）
+- **Card 39-D**：Runtime E2E 验收
+- **Card 39-E**：兼容层清点（旧 orchestrator/delegation_archive 清理计划）
 
 ---
 
