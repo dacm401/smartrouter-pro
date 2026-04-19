@@ -11,6 +11,7 @@
 import { TaskArchiveRepo, TaskCommandRepo, TaskWorkerResultRepo } from "../../db/task-archive-repo.js";
 import { taskPlanner } from "../task-planner.js";
 import { executionLoop } from "../execution-loop.js";
+import { config } from "../../config.js";
 import type { CommandPayload, WorkerResult } from "../../types/index.js";
 
 // 执行单个 execute 命令
@@ -63,7 +64,7 @@ async function executePlanCommand(
           taskId: task_id,
           userId: user_id,
           sessionId,
-          model: "qwen2.5-72b-instruct", // 执行层使用 slow 模型
+          model: config.slowModel, // 从配置读取 slow 模型
           maxSteps: 10,
           maxToolCalls: 20,
         });
@@ -130,6 +131,7 @@ async function executePlanCommand(
         finished_at: new Date(),
         error_message: err.message,
       });
+      await TaskArchiveRepo.updateStatus(archive_id, "failed");
       await TaskArchiveRepo.updateState(archive_id, "failed");
       await TaskArchiveRepo.setSlowExecution(archive_id, {
         result: "",
