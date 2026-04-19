@@ -370,20 +370,7 @@ async function routeByDecision(
       const command = decision.command as CommandPayload | undefined;
       const taskId = uuid();
 
-      // Step 1: 调用 TaskPlanner 生成执行计划
-      let executionPlan: ExecutionPlan | undefined;
-      try {
-        executionPlan = await taskPlanner.plan({
-          taskId,
-          goal: command?.goal ?? message,
-          userId: user_id,
-          sessionId: session_id,
-        });
-      } catch (e: any) {
-        console.warn("[llm-native-router] TaskPlanner.plan failed:", e.message);
-      }
-
-      // Step 2: 写入 TaskArchive（state: executing）
+      // Step 1: 写入 TaskArchive（state: delegated，Worker 会改为 running）
       try {
         const { TaskArchiveRepo } = await import("../db/task-archive-repo.js");
         await TaskArchiveRepo.create({
@@ -395,14 +382,11 @@ async function routeByDecision(
           task_brief: command?.task_brief,
           goal: command?.goal,
         });
-        if (executionPlan) {
-          await TaskArchiveRepo.updateState(taskId, "executing");
-        }
       } catch (e: any) {
         console.warn("[llm-native-router] TaskArchive create failed:", e.message);
       }
 
-      // Step 3: 写入 task_commands
+      // Step 2: 写入 task_commands（execute_worker_loop 会拉取并执行）
       try {
         const { TaskCommandRepo } = await import("../db/task-archive-repo.js");
         if (command) {
@@ -410,8 +394,8 @@ async function routeByDecision(
             task_id: taskId,
             archive_id: taskId,
             user_id,
-            command_type: command.command_type,
-            worker_hint: command.worker_hint,
+            command_type: command.command_type ?? "execute_plan",
+            worker_hint: command.worker_hint ?? "execute_worker",
             priority: command.priority ?? "normal",
             payload: command,
             timeout_sec: command.timeout_sec,
@@ -421,14 +405,9 @@ async function routeByDecision(
         console.warn("[llm-native-router] TaskCommand create failed:", e.message);
       }
 
-      const planStepCount = executionPlan?.steps.length ?? 0;
       const fastReply = language === "zh"
-        ? planStepCount > 0
-          ? `好的，已为你规划了 ${planStepCount} 个步骤，正在执行中...`
-          : "好的，正在处理这个任务。"
-        : planStepCount > 0
-          ? `Got it. I've planned ${planStepCount} step(s) and am executing them...`
-          : "Got it. Processing this task.";
+        ? "好的，正在处理这个任务，稍等一下～"
+        : "Got it. Processing this task, please wait...";
 
       return {
         message: fastReply,
@@ -436,7 +415,6 @@ async function routeByDecision(
         delegation: { task_id: taskId, status: "triggered" },
         routing_layer: "L3",
         decision_type: "execute_task",
-        execution_plan: executionPlan,
         raw_manager_output: raw,
       };
     }

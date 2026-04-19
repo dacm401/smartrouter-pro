@@ -133,6 +133,92 @@ chatRouter.post("/chat", async (c) => {
     // 路径：Fast Manager → ManagerDecision JSON → 路由分发
     // 注意：必须在 useOrchestrator 判断之前，否则 orchestrator 先 return 了
     if (body.use_llm_native_routing === true) {
+
+      // ── SSE 流式分支：use_llm_native_routing=true + stream=true ────────────────
+      // 流程：Manager 决策 → 立即推送安抚消息 → pollArchiveAndYield 推送 Worker 结果
+      if (body.stream === true) {
+        let llmNativeResult;
+        try {
+          llmNativeResult = await routeWithManagerDecision({
+            message: body.message ?? "",
+            user_id: userId,
+            session_id: sessionId,
+            history: body.history ?? [],
+            language: features.language as "zh" | "en",
+            reqApiKey,
+          });
+        } catch (e: any) {
+          console.warn("[stream-llm] routeWithManagerDecision failed:", e.message);
+          return c.json({ error: "LLM-native routing failed: " + e.message }, 500);
+        }
+
+        if (!llmNativeResult) {
+          return c.json({ error: "Manager returned null decision" }, 500);
+        }
+
+        const taskId = llmNativeResult.delegation?.task_id || uuid();
+        const lang = features.language as "zh" | "en";
+
+        // SSE headers
+        c.header("Content-Type", "text/event-stream");
+        c.header("Cache-Control", "no-cache");
+        c.header("Connection", "keep-alive");
+        c.header("X-Accel-Buffering", "no");
+
+        return stream(c, async (s) => {
+          try {
+            // Step 1: 立即推送 Manager 的安抚消息
+            if (llmNativeResult.message) {
+              await s.write(`data: ${JSON.stringify({
+                type: "manager_decision",
+                decision_type: llmNativeResult.decision_type,
+                routing_layer: llmNativeResult.routing_layer,
+                message: llmNativeResult.message,
+              })}\n\n`);
+            }
+
+            // Step 2: Clarifying → 推送澄清问题
+            if (llmNativeResult.clarifying) {
+              await s.write(`data: ${JSON.stringify({
+                type: "clarifying_needed",
+                routing_layer: "L0",
+                question_text: llmNativeResult.clarifying.question_text,
+                options: llmNativeResult.clarifying.options,
+                question_id: llmNativeResult.clarifying.question_id,
+              })}\n\n`);
+            }
+
+            // Step 3: 有 delegation → 轮询 Worker 结果
+            if (llmNativeResult.delegation) {
+              // 推送 command_issued 事件
+              await s.write(`data: ${JSON.stringify({
+                type: "command_issued",
+                task_id: taskId,
+                routing_layer: llmNativeResult.routing_layer,
+              })}\n\n`);
+
+              // pollArchiveAndYield 会推送 worker_progress / worker_completed
+              for await (const event of pollArchiveAndYield(taskId, lang)) {
+                const payload = {
+                  type: event.type,
+                  routing_layer: event.routing_layer ?? llmNativeResult.routing_layer,
+                  stream: event.stream,
+                };
+                await s.write(`data: ${JSON.stringify(payload)}\n\n`);
+              }
+            }
+
+            // done
+            await s.write(`data: ${JSON.stringify({ type: "done", routing_layer: llmNativeResult.routing_layer })}\n\n`);
+          } catch (e: any) {
+            console.error("[stream-llm] SSE error:", e.message);
+            await s.write(`data: ${JSON.stringify({ type: "error", stream: e.message })}\n\n`);
+          }
+        });
+      }
+      // ── End SSE 分支 ──────────────────────────────────────────────────────────
+
+      // ── 普通 HTTP 分支 ─────────────────────────────────────────────────────────
       let llmNativeResult;
       try {
         llmNativeResult = await routeWithManagerDecision({
@@ -167,7 +253,7 @@ chatRouter.post("/chat", async (c) => {
             selected_role: "fast",
             selection_reason: `llm_native(${llmNativeResult.decision?.decision_type ?? "unknown"})`,
             fallback_model: config.slowModel,
-            routing_layer: "L3",
+            routing_layer: llmNativeResult.routing_layer,
           },
           context: {
             original_tokens: 0,

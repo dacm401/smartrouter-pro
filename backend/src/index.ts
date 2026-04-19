@@ -10,6 +10,9 @@ import { memoryRouter } from "./api/memory.js";
 import { evidenceRouter } from "./api/evidence.js";
 import { healthRouter } from "./api/health.js";
 import { archiveRouter } from "./api/archive.js";
+// Phase 3.0: 启动后台 Worker 轮询循环
+import { startSlowWorker } from "./services/phase3/slow-worker-loop.js";
+import { startExecuteWorker } from "./services/phase3/execute-worker-loop.js";
 
 const app = new Hono();
 
@@ -35,3 +38,7 @@ console.log(`
 `);
 
 serve({ fetch: app.fetch, port: config.port });
+
+// Phase 3.0: 启动后台 Worker（独立轮询循环，不阻塞 HTTP 请求）
+startSlowWorker();
+startExecuteWorker();

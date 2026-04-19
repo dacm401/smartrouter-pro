@@ -351,14 +351,16 @@ CREATE TABLE task_archives (
 
 ---
 
-### Phase 2：Slow 改为只读 Archive，不读全 history
+### Phase 2：Slow 优先只读 Archive，必要时可读 history
 
-**最关键的一刀**。
+**默认路径**：Worker 优先只读 Archive（task brief / evidence / confirmed facts / constraints），减少冗余上下文。
+
+**例外**：当 Archive 信息不足以完成任务时，Worker 可主动读取 history 补全上下文。此时 token 会更贵，但任务正确性优先。
 
 **变更前**（Slow 接收）：
 - system prompt + full history + memory + evidence + tools + task summary
 
-**变更后**（Slow 接收）：
+**默认变更后**（Slow 接收）：
 - worker system prompt
 - task brief
 - selected evidence
