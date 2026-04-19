@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, rmSync, readdirSync } from "fs";
 import { join } from "path";
-import { LocalArchiveStore } from "../../src/services/phase5/local-archive-store";
+import { LocalArchiveStore, createArchiveStore } from "../../../src/services/phase5/index.js";
 
 const TEST_BASE_PATH = join(process.cwd(), "test-data", "archive-store");
 
@@ -356,8 +356,6 @@ describe("LocalArchiveStore", () => {
 });
 
 describe("ArchiveStore Factory", () => {
-  const { createArchiveStore } = require("../../src/services/phase5/local-archive-store");
-
   it("应该为 local 类型创建 LocalArchiveStore", () => {
     const store = createArchiveStore("local");
 

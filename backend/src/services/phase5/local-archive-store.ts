@@ -5,7 +5,7 @@
  * 用于：数据主权要求 / 离线场景 / 低延迟需求。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { v4 as uuid } from "uuid";
 
@@ -140,7 +140,7 @@ export class LocalArchiveStore {
       .map((f) => ({
         name: f,
         path: join(sessionDir, f),
-        mtime: new Date(readFileSync(join(sessionDir, f), "utf-8")).getTime(),
+        mtime: statSync(join(sessionDir, f)).mtimeMs,
       }))
       .sort((a, b) => b.mtime - a.mtime);
 
