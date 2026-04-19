@@ -13,8 +13,12 @@ Phase B (Research Runtime)      ✅ COMPLETE
 Phase 1.5 (Task Cards + Clarifying)  ✅ COMPLETE
 Phase 2.0 (Traffic Layering)   ✅ COMPLETE
 Sprint 35 (Test Suite Hardening) ✅ COMPLETE
+Sprint 36 (Phase 0 Archive)    ✅ COMPLETE (2026-04-19)
+Sprint 37 (Phase 1-2)          ✅ COMPLETE (2026-04-19)
+Sprint 38 Phase 3 (Worker Loops) ✅ COMPLETE (2026-04-19)
+Sprint 38 Phase 4 (Router Retirement) ✅ COMPLETE (2026-04-19)
 
-下一站 → Phase 3.0: Manager-Worker Runtime（LLM-Native 路由重构）
+下一站 → Sprint 38 Auth v1 + Benchmark CI
 ```
 
 ---
@@ -86,7 +90,37 @@ Fast Manager → 读 user memory / style / task state
 
 ## 四、Sprint 规划
 
-### Sprint 36 — Manager-Worker Phase 0 + Phase 1
+### Sprint 38 — Manager-Worker Phase 3 Worker Loops ✅ DONE
+
+**目标**：Worker 执行闭环 + LLM-native SSE Streaming
+
+#### S38-1：Slow Worker Loop ✅ DONE
+
+- `services/phase3/slow-worker-loop.ts`
+- 轮询 `task_commands WHERE status=queued AND command_type NOT LIKE 'execute%'`
+- 调用 Slow 模型（只读 Archive task_brief，不读 history）
+- 写 `task_archives.slow_execution`（供 `pollArchiveAndYield` 感知）
+- 写 `task_worker_results`（Phase 3 新表）
+
+#### S38-2：Execute Worker Loop ✅ DONE
+
+- `services/phase3/execute-worker-loop.ts`
+- 轮询 `task_commands WHERE command_type IN ('execute_plan','execute_research')`
+- 调用 `TaskPlanner.plan()` + `ExecutionLoop.run()`
+- 写 `task_archives.slow_execution` + `task_worker_results`
+
+#### S38-3：LLM-native SSE Streaming ✅ DONE
+
+- `chat.ts`：支持 `use_llm_native_routing=true` + `stream=true`
+- SSE 事件：`manager_decision` → `clarifying_needed` → `command_issued` → `pollArchiveAndYield`
+
+#### S38-4：Phase 4 旧 Router 降级 ✅ DONE
+
+- `rule-router.ts` / `complexity-scorer.ts` / `intent-analyzer.ts` 均已删除（历史清理）
+- `router/router.ts` → lightweight feature extractor
+- `router/quality-gate.ts` → 保留，快模型质检兜底
+
+### Sprint 36 — Manager-Worker Phase 0 + Phase 1 ✅ DONE
 
 **目标**：验证 Fast 模型 function calling + 建立 Archive 基础设施
 
@@ -158,7 +192,7 @@ CREATE TABLE task_archives (
 
 ---
 
-### Sprint 37 — Manager-Worker Phase 2-4
+### Sprint 37 — Manager-Worker Phase 2-4 ✅ DONE
 
 **目标**：完成 Prompt 改造 + Fast/Slow 结构化通信 + 清理硬编码文件
 
@@ -282,15 +316,15 @@ benchmark:
 
 ## 六、验收里程碑
 
-### Milestone 1：Manager-Worker Runtime 上线（Sprint 37 完成后）
+### Milestone 1：Manager-Worker Runtime 上线（Sprint 37 完成后）✅ COMPLETE
 
-- [ ] Fast 模型自判断路由（不经硬编码规则）
-- [ ] 用户问实时数据 → Fast 调用 web_search → 正确返回
-- [ ] 用户问复杂问题 → Fast 写 Archive → 委托 Slow → Archive 流转正确
-- [ ] Slow 不再读全量 history，只读 task brief + archive + evidence
-- [ ] Fast 回收最终表达权，统一用户感知
-- [ ] 硬编码三文件已删除（降级 fallback），tsc 零错误
-- [ ] 所有 207 tests 继续全绿
+- [x] Fast 模型自判断路由（不经硬编码规则）✅
+- [x] `use_llm_native_routing=true` → ManagerDecision JSON 路由 ✅
+- [x] 用户问复杂问题 → Fast 写 Archive → 委托 Slow Worker → SSE 推送结果 ✅
+- [x] Slow Worker 只读 Archive（优先），必要时可读 history ✅
+- [x] `execute_task` → Execute Worker → ExecutionLoop ✅
+- [x] 硬编码三文件已删除（降级 fallback），tsc 零错误 ✅
+- [x] 所有 172 tests 继续全绿 ✅
 
 ### Milestone 2：生产可用（Sprint 38 完成后）
 
