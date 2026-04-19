@@ -274,12 +274,31 @@ async function routeByDecision(
       const clarifyingMessage = cq?.options?.length
         ? `${questionText} ${cq.options.map((o) => `"${o.label}"`).join(" / ")}`
         : questionText;
+
+      // B39-02 fix: ask_clarification 写 task_archives，便于追踪 ClarifyQuestion 后续状态
+      const clarifyingTaskId = uuid();
+      try {
+        const { TaskArchiveRepo } = await import("../db/task-archive-repo.js");
+        await TaskArchiveRepo.create({
+          task_id: clarifyingTaskId,
+          user_id,
+          session_id,
+          decision,
+          user_input: message,
+        });
+        // create 默认 state=delegated，改为 clarifying 以便追踪
+        await TaskArchiveRepo.updateState(clarifyingTaskId, "clarifying");
+      } catch (e: any) {
+        console.warn("[llm-native-router] Clarifying archive create failed:", e.message);
+      }
+
       return {
         message: clarifyingMessage,
         decision,
         routing_layer: "L0",
         decision_type: "ask_clarification",
         clarifying: cq,
+        clarifying_task_id: clarifyingTaskId,
         raw_manager_output: raw,
       };
     }
@@ -319,38 +338,6 @@ async function routeByDecision(
       } catch (e: any) {
         console.warn("[llm-native-router] TaskCommand create failed:", e.message);
       }
-
-      // 触发慢模型后台执行
-      const taskBrief: SlowModelCommand = command
-        ? {
-            action: (command.task_type ?? "analysis") as SlowModelCommand["action"],
-            task: command.task_brief,
-            constraints: command.constraints ?? [],
-            query_keys: [],
-            relevant_facts: [],
-            user_preference_summary: "",
-            priority: command.priority ?? "normal",
-            max_execution_time_ms: (command.timeout_sec ?? 60) * 1000,
-          }
-        : {
-            action: "analysis",
-            task: message,
-            constraints: [],
-            query_keys: [],
-            relevant_facts: [],
-            user_preference_summary: "",
-            priority: "normal",
-            max_execution_time_ms: 60000,
-          };
-
-      triggerSlowModelBackground({
-        taskId,
-        message,
-        command: taskBrief,
-        user_id,
-        session_id,
-        reqApiKey,
-      }).catch((e) => console.error("[llm-native-router] Slow trigger failed:", e.message));
 
       const fastReply = language === "zh"
         ? "这个问题比较深，我正在请更专业的模型帮你分析，稍等一下～"
