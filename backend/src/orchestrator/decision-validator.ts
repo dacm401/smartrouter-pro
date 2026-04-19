@@ -10,20 +10,20 @@ import type { ManagerDecision, ManagerDecisionType, RoutingLayer } from "../type
 
 const ClarifyOptionSchema = z.object({
   label: z.string().min(1).max(200),
-  value: z.string().min(1).max(100),
+  value: z.string().min(1).max(100).optional(),  // Manager 可省略
 });
 
 const ClarificationSchema = z.object({
-  question_id: z.string().min(1).max(100),
+  question_id: z.string().min(1).max(100).optional(),  // Manager 可省略
   question_text: z.string().min(1).max(500),
   options: z.array(ClarifyOptionSchema).max(10).optional(),
   allow_free_text: z.boolean().optional(),
-  clarification_reason: z.string().min(1).max(300),
+  clarification_reason: z.string().min(1).max(300).optional(),  // Manager 可省略
   missing_fields: z.array(z.string()).max(20).optional(),
 });
 
 const DirectResponseSchema = z.object({
-  style: z.enum(["concise", "natural", "structured"]),
+  style: z.enum(["concise", "natural", "structured"]).optional(),  // Manager 可省略，默认 natural
   content: z.string().min(1).max(2000),
   max_tokens_hint: z.number().int().min(1).max(2000).optional(),
 });
@@ -45,10 +45,10 @@ const InputMaterialSchema = z.object({
 });
 
 const CommandSchema = z.object({
-  command_type: z.enum(["delegate_analysis", "delegate_summarization", "execute_plan", "execute_research"]),
-  task_type: z.string().min(1).max(100),
+  command_type: z.enum(["delegate_analysis", "delegate_summarization", "execute_plan", "execute_research"]).optional(),  // Manager 可省略
+  task_type: z.string().min(1).max(100).optional(),  // Manager 可省略，默认 analysis
   task_brief: z.string().min(1).max(4000),
-  goal: z.string().min(1).max(1000),
+  goal: z.string().min(1).max(1000).optional(),  // Manager 可省略，默认等于 task_brief
   constraints: z.array(z.string().max(300)).max(20).optional(),
   input_materials: z.array(InputMaterialSchema).max(30).optional(),
   required_output: RequiredOutputSchema.optional(),
@@ -64,10 +64,10 @@ const ManagerDecisionSchema = z
   .object({
     schema_version: z.literal("manager_decision_v1"),
     decision_type: z.enum(["direct_answer", "ask_clarification", "delegate_to_slow", "execute_task"]),
-    routing_layer: z.enum(["L0", "L1", "L2", "L3"]),
+    routing_layer: z.enum(["L0", "L1", "L2", "L3"]).optional(),  // 默认 L0，Manager 可省略
     reason: z.string().min(1).max(300),
     confidence: z.number().min(0).max(1),
-    needs_archive: z.boolean(),
+    needs_archive: z.boolean().optional(),  // 默认 true，Manager 可省略
     direct_response: DirectResponseSchema.optional(),
     clarification: ClarificationSchema.optional(),
     command: CommandSchema.optional(),
@@ -123,13 +123,34 @@ export function validateManagerDecision(
 export function validateManagerDecisionSemantic(
   decision: ManagerDecision
 ): ManagerDecision {
-  // delegate_to_slow 默认 worker_hint = slow_analyst
-  if (
-    decision.decision_type === "delegate_to_slow" &&
-    decision.command &&
-    !decision.command.worker_hint
-  ) {
-    decision.command.worker_hint = "slow_analyst";
+  // routing_layer 默认 L0
+  if (!decision.routing_layer) {
+    decision.routing_layer = "L0";
+  }
+  // needs_archive 默认 true
+  if (decision.needs_archive === undefined) {
+    decision.needs_archive = true;
+  }
+  // command 字段默认值
+  if (decision.command) {
+    if (!decision.command.command_type) {
+      decision.command.command_type = decision.decision_type === "execute_task"
+        ? "execute_plan"
+        : "delegate_analysis";
+    }
+    if (!decision.command.task_type) {
+      decision.command.task_type = "analysis";
+    }
+    if (!decision.command.goal) {
+      decision.command.goal = decision.command.task_brief;
+    }
+    // delegate_to_slow 默认 worker_hint = slow_analyst
+    if (
+      decision.decision_type === "delegate_to_slow" &&
+      !decision.command.worker_hint
+    ) {
+      decision.command.worker_hint = "slow_analyst";
+    }
   }
   // execute_task 至少需要 tools_allowed（不在 schema 层强制，由语义层提醒）
   if (decision.decision_type === "execute_task" && decision.command) {

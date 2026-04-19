@@ -28,71 +28,117 @@ import { taskPlanner } from "./task-planner.js";
 // ── Manager Prompt ────────────────────────────────────────────────────────────
 
 function buildManagerSystemPrompt(lang: "zh" | "en"): string {
-  if (lang === "zh") {
-    return `你是 SmartRouter Pro 的 Manager（管理模型）。
+  // 中文版 prompt
+  const zhPrompt = `你是 SmartRouter Pro 的 Manager（管理模型）。
 
-【你的职责】
-理解用户请求后，决定下一步最优处理路径，并严格按以下 JSON Schema 输出。
+理解用户请求后，决定最优处理路径，严格按以下 JSON Schema 输出。
 
-【决策类型】
+【四种决策类型 — 必须严格使用以下 JSON 格式】
 
 1. direct_answer（直接回答）
-   - 适用：闲聊/打招呼/情绪表达/简单问答/不需要外部数据的请求
-   - 输出：符合用户风格的简短回复草稿
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "direct_answer",
+  "direct_response": { "content": "你的回复内容" },
+  "reason": "为什么直接回答",
+  "confidence": 1.0
+}
 
 2. ask_clarification（请求澄清）
-   - 适用：请求模糊、缺少关键信息（目标/范围/格式/对象不明确）
-   - 输出：一个自然语言问题，给出选项（如果有）
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "ask_clarification",
+  "clarification": { "question_text": "你的问题", "options": [{ "label": "选项A" }] },
+  "reason": "为什么需要澄清",
+  "confidence": 1.0
+}
 
 3. delegate_to_slow（委托慢模型）
-   - 适用：需要深度分析/多步推理/复杂推理/超出知识截止日期的任务
-   - 输出：结构化的 task_brief 和 goal，给出约束条件
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "delegate_to_slow",
+  "command": { "task_brief": "压缩后的任务摘要", "constraints": ["约束1"] },
+  "reason": "为什么委托慢模型",
+  "confidence": 1.0
+}
 
 4. execute_task（执行任务）
-   - 适用：需要工具调用/代码执行/搜索/多步操作
-   - 输出：执行计划，列出允许的工具
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "execute_task",
+  "command": { "goal": "任务目标描述" },
+  "reason": "为什么需要执行任务",
+  "confidence": 1.0
+}
+
+【决策原则】
+- direct_answer: 闲聊/打招呼/情绪表达/简单问答，不需要外部数据
+- ask_clarification: 请求模糊、缺少关键信息（目标/范围/格式不明确）
+- delegate_to_slow: 深度分析/多步推理/复杂推理/知识截止日期外的内容
+- execute_task: 需要工具调用/代码执行/搜索/多步操作
+- 能直接答就不委托，委托时 task_brief 压缩到最小必要信息
 
 【输出规则】
 - 只输出 JSON 对象，不输出其他文字
 - JSON 用代码块包裹：\`\`\`json ... \`\`\`
-- schema_version 固定为 "manager_decision_v1"
-- reason 字段说明你的决策原因（供调试/日志使用）
-- confidence 是你对决策的置信度（0.0 ~ 1.0）
+- 必须包含 schema_version / decision_type / reason / confidence`;
 
-【决策原则】
-- 能直接答就不委托
-- 委托慢模型时，task_brief 要压缩到最小必要信息
-- 只有在不确定、需要外部数据、或者需要深度推理时才委托`;
-  }
-  return `You are SmartRouter Pro's Manager model.
+  // 英文版 prompt
+  const enPrompt = `You are SmartRouter Pro's Manager model.
 
-【Your Role】
-Understand the user's request, decide the optimal next step, and output strictly in the JSON Schema below.
+Understand the user's request, decide the optimal next step, and output strictly following the JSON Schema below.
 
-【Decision Types】
+【Four Decision Types — EXACT JSON format required】
 
 1. direct_answer
-   - Use for: chat/greeting/emotional expression/simple Q&A/no external data needed
-   - Output: brief reply draft matching user style
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "direct_answer",
+  "direct_response": { "content": "Your reply content" },
+  "reason": "Why direct answer",
+  "confidence": 1.0
+}
 
 2. ask_clarification
-   - Use for: ambiguous request, missing key info (goal/scope/format/target unclear)
-   - Output: one natural language question, with options if applicable
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "ask_clarification",
+  "clarification": { "question_text": "Your question here", "options": [{ "label": "Option A" }] },
+  "reason": "Why clarification is needed",
+  "confidence": 1.0
+}
 
 3. delegate_to_slow
-   - Use for: deep analysis/multi-step reasoning/complex reasoning/knowledge cutoff exceeded
-   - Output: structured task_brief and goal with constraints
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "delegate_to_slow",
+  "command": { "task_brief": "Compressed task summary", "constraints": ["constraint1"] },
+  "reason": "Why delegate to slow model",
+  "confidence": 1.0
+}
 
 4. execute_task
-   - Use for: requires tool calling/code execution/search/multi-step operations
-   - Output: execution plan with allowed tools listed
+{
+  "schema_version": "manager_decision_v1",
+  "decision_type": "execute_task",
+  "command": { "goal": "Task goal description" },
+  "reason": "Why execute task",
+  "confidence": 1.0
+}
+
+【Decision Rules】
+- direct_answer: chat/greeting/emotional/simple Q&A, no external data needed
+- ask_clarification: ambiguous request, missing key info (goal/scope/format unclear)
+- delegate_to_slow: deep analysis/multi-step reasoning/complex reasoning/knowledge cutoff exceeded
+- execute_task: requires tool calling/code execution/search/multi-step operations
+- Prefer direct_answer when possible; compress task_brief to minimum when delegating
 
 【Output Rules】
-- Output JSON object ONLY, no other text
+- Output JSON ONLY, no other text
 - Wrap JSON in code block: \`\`\`json ... \`\`\`
-- schema_version is always "manager_decision_v1"
-- reason field: explain your decision (for debug/logging)
-- confidence: your confidence in the decision (0.0 ~ 1.0)`;
+- Must include: schema_version / decision_type / reason / confidence`;
+
+  return lang === "zh" ? zhPrompt : enPrompt;
 }
 
 // ── 入参 ─────────────────────────────────────────────────────────────────────
@@ -224,7 +270,6 @@ async function routeByDecision(
 
     case "ask_clarification": {
       const cq = decision.clarification as ClarifyQuestion | undefined;
-      // 返回一个问题（clarifying 状态由 chat.ts 调用方处理）
       const questionText = cq?.question_text ?? (language === "zh" ? "能再具体一点吗？" : "Could you be more specific?");
       const clarifyingMessage = cq?.options?.length
         ? `${questionText} ${cq.options.map((o) => `"${o.label}"`).join(" / ")}`
@@ -243,7 +288,7 @@ async function routeByDecision(
       const command = decision.command as CommandPayload | undefined;
       const taskId = uuid();
 
-      // Phase 3.0: 写入 TaskArchive（新 Phase 3 表）
+      // Phase 3.0: 写入 TaskArchive
       try {
         const { TaskArchiveRepo } = await import("../db/task-archive-repo.js");
         await TaskArchiveRepo.create({
@@ -255,16 +300,15 @@ async function routeByDecision(
         });
       } catch (e: any) {
         console.warn("[llm-native-router] TaskArchive create failed:", e.message);
-        // Archive 写失败不阻止慢模型执行
       }
 
-      // Phase 3.0: 写入 task_commands（新 Phase 3 表）
+      // Phase 3.0: 写入 task_commands
       try {
         const { TaskCommandRepo } = await import("../db/task-archive-repo.js");
         if (command) {
           await TaskCommandRepo.create({
             task_id: taskId,
-            archive_id: taskId, // Phase 1: archive_id = task_id（简单处理）
+            archive_id: taskId,
             user_id,
             command_type: command.command_type,
             worker_hint: command.worker_hint,
@@ -276,9 +320,7 @@ async function routeByDecision(
         console.warn("[llm-native-router] TaskCommand create failed:", e.message);
       }
 
-      // 触发慢模型后台执行（复用 orchestrator 的 triggerSlowModelBackground）
-      // 注意：Phase 1 使用 Phase 1.5 SlowModelCommand 格式，与 Phase 3 CommandPayload 有差异
-      // Phase 1 直接传 message，不传 Phase 3 command_payload
+      // 触发慢模型后台执行
       const taskBrief: SlowModelCommand = command
         ? {
             action: (command.task_type ?? "analysis") as SlowModelCommand["action"],
@@ -310,7 +352,6 @@ async function routeByDecision(
         reqApiKey,
       }).catch((e) => console.error("[llm-native-router] Slow trigger failed:", e.message));
 
-      // 快速安抚回复
       const fastReply = language === "zh"
         ? "这个问题比较深，我正在请更专业的模型帮你分析，稍等一下～"
         : "This is complex. I'm getting a more specialized model to analyze it, please wait...";
@@ -326,8 +367,6 @@ async function routeByDecision(
     }
 
     case "execute_task": {
-      // Phase 2: 调用 TaskPlanner 规划 + 写 Archive + SSE 推送 plan
-      // Phase 3 才实现后台异步 ExecutionLoop
       const command = decision.command as CommandPayload | undefined;
       const taskId = uuid();
 
@@ -342,7 +381,6 @@ async function routeByDecision(
         });
       } catch (e: any) {
         console.warn("[llm-native-router] TaskPlanner.plan failed:", e.message);
-        // TaskPlanner 失败 → fallback，不阻断
       }
 
       // Step 2: 写入 TaskArchive（state: executing）
@@ -364,7 +402,7 @@ async function routeByDecision(
         console.warn("[llm-native-router] TaskArchive create failed:", e.message);
       }
 
-      // Step 3: 写入 task_commands（Phase 3 worker 拉取）
+      // Step 3: 写入 task_commands
       try {
         const { TaskCommandRepo } = await import("../db/task-archive-repo.js");
         if (command) {
@@ -383,7 +421,6 @@ async function routeByDecision(
         console.warn("[llm-native-router] TaskCommand create failed:", e.message);
       }
 
-      // 快速安抚回复（Phase 3 后台执行完成后才推送结果）
       const planStepCount = executionPlan?.steps.length ?? 0;
       const fastReply = language === "zh"
         ? planStepCount > 0
