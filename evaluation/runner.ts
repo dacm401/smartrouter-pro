@@ -177,7 +177,7 @@ async function runRoutingBenchmark(
 
     try {
       // 使用 LLM-Native 路由评估端点
-      const res = await fetch(`${baseUrl}/api/chat/eval/routing`, {
+      const res = await fetch(`${baseUrl}/api/eval/routing`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
