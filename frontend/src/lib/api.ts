@@ -23,7 +23,7 @@ export function getApiConfig() {
 }
 
 /** Exported so components can build streaming fetch URLs directly */
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://backend:3001";
+export const API_BASE = "http://localhost:3001";
 
 export async function sendMessage(message: string, history: any[], userId: string, sessionId: string) {
   const { apiBase, apiKey, fastModel, slowModel } = getApiConfig();
