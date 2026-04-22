@@ -1,6 +1,6 @@
 // 获取API配置
 export function getApiConfig() {
-  const DEFAULT_API_BASE = "http://backend:3001";
+  const DEFAULT_API_BASE = "http://localhost:3001";
   if (typeof window !== "undefined") {
     // 强制纠正：不允许 api_url 指向外部 API，只能是本地后端
     const storedUrl = localStorage.getItem("api_url");
