@@ -11,14 +11,14 @@ export function getApiConfig() {
       apiBase: DEFAULT_API_BASE,
       apiKey: localStorage.getItem("api_key") || "",
       fastModel: localStorage.getItem("fast_model") || "Qwen/Qwen2.5-7B-Instruct",
-      slowModel: localStorage.getItem("slow_model") || "deepseek-ai/DeepSeek-V3",
+      slowModel: localStorage.getItem("slow_model") || "Qwen/Qwen2.5-72B-Instruct",
     };
   }
   return {
     apiBase: process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE,
     apiKey: "",
     fastModel: "Qwen/Qwen2.5-7B-Instruct",
-    slowModel: "deepseek-ai/DeepSeek-V3",
+    slowModel: "Qwen/Qwen2.5-72B-Instruct",
   };
 }
 
